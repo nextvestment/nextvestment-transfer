@@ -1,6 +1,6 @@
 [package]
 name = "brows3"
-version = "0.2.46"
+version = "0.2.47"
 description = "Nextvestment project file transfer client, based on Brows3."
 authors = ["Brows3 Team", "Nextvestment"]
 license = "MIT"

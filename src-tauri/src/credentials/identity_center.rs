@@ -98,11 +98,24 @@ fn validate_portal(start_url: &str, region: &str) -> Result<String> {
     }
     Ok(format!("https://{host}/start"))
 }
-fn validate_verification_url(value: &str, region: &str) -> Result<()> {
+fn validate_verification_url(value: &str, region: &str, start_url: &str) -> Result<()> {
     let url = url::Url::parse(value).map_err(|_| invalid(NETWORK))?;
+    let portal =
+        url::Url::parse(&validate_portal(start_url, region)?).map_err(|_| invalid(NETWORK))?;
     let expected = format!("device.sso.{region}.amazonaws.com");
+    // AWS supports both its regional device endpoint and the configured
+    // organization's access portal. Never accept a different tenant's portal.
+    let regional_device = url.host_str() == Some(expected.as_str()) && url.path() == "/";
+    let tenant_device = url.host_str() == portal.host_str()
+        && matches!(url.path(), "/start" | "/start/")
+        && url.fragment().is_some_and(|fragment| {
+            matches!(
+                fragment.split('?').next(),
+                Some("/device") | Some("/device/")
+            )
+        });
     if url.scheme() != "https"
-        || url.host_str() != Some(expected.as_str())
+        || !(regional_device || tenant_device)
         || url.port().is_some()
         || !url.username().is_empty()
         || url.password().is_some()
@@ -244,7 +257,7 @@ pub async fn start_identity_center_login(
         .or(auth.verification_uri())
         .ok_or_else(|| invalid(NETWORK))?
         .to_owned();
-    validate_verification_url(&uri, &sso_region)?;
+    validate_verification_url(&uri, &sso_region, &start_url)?;
     let interval = (auth.interval().max(1) as u64).max(5);
     let expires_in = (auth.expires_in().max(1) as u64).min(900);
     let session_id = uuid::Uuid::new_v4().to_string();
@@ -288,7 +301,7 @@ pub async fn open_identity_center_login(session_id: String, app: tauri::AppHandl
         .get(&session_id)
         .filter(|s| s.expires_at > now())
         .ok_or_else(|| invalid(SIGN_IN))?;
-    validate_verification_url(&item.verification_uri, &item.region)?;
+    validate_verification_url(&item.verification_uri, &item.region, &item.start_url)?;
     #[allow(deprecated)]
     app.shell().open(&item.verification_uri, None).map_err(|_| {
         invalid("Could not open the browser. Copy the displayed AWS sign-in URL into your browser.")
@@ -704,19 +717,55 @@ mod tests {
     fn verification_link_must_be_the_matching_regional_aws_service() {
         assert!(validate_verification_url(
             "https://device.sso.ap-southeast-1.amazonaws.com/?user_code=ABCD",
-            "ap-southeast-1"
+            "ap-southeast-1",
+            "https://company.awsapps.com/start"
         )
         .is_ok());
         assert!(validate_verification_url(
             "https://device.sso.us-east-1.amazonaws.com/",
-            "ap-southeast-1"
+            "ap-southeast-1",
+            "https://company.awsapps.com/start"
         )
         .is_err());
         assert!(validate_verification_url(
             "https://device.sso.ap-southeast-1.amazonaws.com.attacker.test/",
-            "ap-southeast-1"
+            "ap-southeast-1",
+            "https://company.awsapps.com/start"
         )
         .is_err());
+    }
+    #[test]
+    fn verification_link_accepts_only_the_configured_portal_device_route() {
+        for link in [
+            "https://company.awsapps.com/start/#/device",
+            "https://company.awsapps.com/start/#/device?user_code=ABCD",
+        ] {
+            assert!(validate_verification_url(
+                link,
+                "ap-southeast-1",
+                "https://company.awsapps.com/start"
+            )
+            .is_ok());
+        }
+        for link in [
+            "https://other.awsapps.com/start/#/device?user_code=ABCD",
+            "https://company.awsapps.com.attacker.test/start/#/device",
+            "https://company.awsapps.com/other/#/device",
+            "https://company.awsapps.com/start/#/other",
+            "http://company.awsapps.com/start/#/device",
+            "https://user@company.awsapps.com/start/#/device",
+            "https://company.awsapps.com:8443/start/#/device",
+        ] {
+            assert!(
+                validate_verification_url(
+                    link,
+                    "ap-southeast-1",
+                    "https://company.awsapps.com/start"
+                )
+                .is_err(),
+                "{link}"
+            );
+        }
     }
     #[test]
     fn identity_metadata_and_debug_never_contain_token() {
