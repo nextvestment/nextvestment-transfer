@@ -1,0 +1,44 @@
+name: Build desktop packages
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  desktop:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, windows-2022]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          package-manager-cache: false
+      - uses: pnpm/action-setup@v6.0.8
+        with:
+          version: 11.2.2
+      - uses: dtolnay/rust-toolchain@1.97.1
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm tauri build
+      - name: Package Windows portable client
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path portable | Out-Null
+          Copy-Item src-tauri/target/release/brows3.exe portable/NextvestmentTransfer.exe
+          New-Item -ItemType File -Path portable/nextvestment-transfer.portable | Out-Null
+          Set-Content portable/README.txt 'Requires an existing Microsoft WebView2 runtime. Choose AWS browser sign-in in the app; AWS CLI and Git are not required. Native sign-in tokens and manual secret keys use Windows Credential Manager. Portable metadata does not include credentials. Follow your organization software policy.'
+          Compress-Archive -Path portable/* -DestinationPath NextvestmentTransfer-Windows-portable.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nextvestment-transfer-${{ runner.os }}
+          path: |
+            NextvestmentTransfer-Windows-portable.zip
+            src-tauri/target/release/bundle/**/*.dmg
+            src-tauri/target/release/bundle/**/*.msi
+            src-tauri/target/release/bundle/**/*.exe
+          if-no-files-found: error
+          retention-days: 30

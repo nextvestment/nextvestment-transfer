@@ -1,0 +1,76 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Nextvestment Transfer",
+  "version": "0.2.46",
+  "identifier": "com.nextvestment.transfer",
+  "build": {
+    "frontendDist": "../out",
+    "devUrl": "http://localhost:3001",
+    "beforeDevCommand": "pnpm dev",
+    "beforeBuildCommand": "pnpm build"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "title": "Nextvestment Transfer",
+        "width": 1280,
+        "height": 800,
+        "minWidth": 800,
+        "minHeight": 600,
+        "resizable": true,
+        "fullscreen": false,
+        "center": true,
+        "devtools": false,
+        "transparent": false,
+        "decorations": true,
+        "visible": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' asset: https: http: data:; connect-src 'self' https: ipc:; frame-src 'self' https: http:; media-src 'self' https: http:; object-src 'self' https: http:; worker-src 'self' blob:;"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "createUpdaterArtifacts": false,
+    "targets": [
+      "msi",
+      "nsis",
+      "deb",
+      "appimage",
+      "dmg",
+      "app"
+    ],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "copyright": "\u00a9 2024 Brows3 contributors; Nextvestment modifications. MIT License.",
+    "publisher": "Nextvestment",
+    "category": "Utility",
+    "shortDescription": "Private project file transfers for Nextvestment.",
+    "longDescription": "Nextvestment project file transfer client, based on Brows3 under the MIT License.",
+    "license": "MIT",
+    "homepage": "https://github.com/nextvestment/nextvestment-transfer",
+    "macOS": {
+      "signingIdentity": "-"
+    },
+    "windows": {
+      "webviewInstallMode": {
+        "type": "offlineInstaller"
+      },
+      "nsis": {
+        "displayLanguageSelector": false,
+        "languages": [
+          "English"
+        ]
+      }
+    }
+  },
+  "plugins": {}
+}

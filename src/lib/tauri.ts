@@ -1,0 +1,497 @@
+import { useMonitorStore } from '@/store/monitorStore';
+import { useProfileStore } from '@/store/profileStore';
+
+// Check if running in Tauri environment
+export const isTauri = (): boolean => {
+  return typeof window !== 'undefined' && '__TAURI__' in window;
+};
+
+// Dynamically get Tauri invoke - only import when actually in Tauri context
+const getTauriInvoke = async () => {
+  if (!isTauri()) {
+    throw new Error('Not running in Tauri environment. This feature requires the desktop application.');
+  }
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke;
+};
+
+// Monitored invoke wrapper
+const invoke = async <T>(cmd: string, args?: Record<string, unknown>): Promise<T> => {
+  const scopedArgs = { expectedProfileId: useProfileStore.getState().activeProfileId, ...args };
+  const store = useMonitorStore.getState();
+  store.incrementRequests();
+  
+  try {
+    const tauriInvoke = await getTauriInvoke();
+    if (scopedArgs.expectedProfileId && scopedArgs.expectedProfileId !== useProfileStore.getState().activeProfileId) {
+      throw new Error('The active profile changed. Select the items again.');
+    }
+    const result = await tauriInvoke<T>(cmd, scopedArgs);
+    store.addLog('success', cmd);
+    return result;
+  } catch (err) {
+    store.incrementFailures();
+    
+    let errorMessage = String(err);
+    if (err instanceof Error) {
+      errorMessage = err.message;
+    } else if (err && typeof err === 'object') {
+      // Handle serialization of backend errors
+      try {
+        errorMessage = JSON.stringify(err);
+      } catch {
+        // Fallback if circular or not serializable
+        errorMessage = String(err);
+      }
+    }
+
+    store.addLog('error', cmd, errorMessage);
+    throw err;
+  }
+};
+
+// Cache invalidation helper - hooks can subscribe to write-driven invalidation
+type CacheScope = 'objects' | 'buckets';
+const cacheInvalidators = new Set<(scope: CacheScope) => void>();
+
+export const subscribeCacheInvalidation = (fn: (scope: CacheScope) => void) => {
+  cacheInvalidators.add(fn);
+  return () => {
+    cacheInvalidators.delete(fn);
+  };
+};
+
+export const invalidateCache = (scope: CacheScope = 'objects') => {
+  for (const fn of cacheInvalidators) {
+    fn(scope);
+  }
+};
+
+export const copyToClipboard = async (text: string): Promise<void> => {
+  if (isTauri()) {
+    const { writeText } = await import('@tauri-apps/plugin-clipboard-manager');
+    await writeText(text);
+    return;
+  }
+
+  if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  throw new Error('Clipboard API is not available');
+};
+
+export interface LogFileInfo {
+  log_file_path: string;
+  log_dir_path: string;
+  panic_log_path: string;
+  panic_log_exists: boolean;
+}
+
+export const logApi = {
+  async getLogFileInfo(): Promise<LogFileInfo> {
+    return invoke<LogFileInfo>('get_log_file_info');
+  },
+};
+
+// Profile types matching Rust backend
+export type CredentialType = 
+  | { type: 'Environment' }
+  | { type: 'SharedConfig'; profile_name?: string }
+  | { type: 'IdentityCenter'; start_url: string; sso_region: string; account_id: string; role_name: string; session_ref: string }
+  | { type: 'Manual'; access_key_id: string; secret_access_key: string }
+  | { type: 'CustomEndpoint'; endpoint_url: string; access_key_id: string; secret_access_key: string };
+
+export interface Profile {
+  id: string;
+  name: string;
+  credential_type: CredentialType;
+  region?: string;
+  is_default: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface TestConnectionResult {
+  success: boolean;
+  message: string;
+  region?: string;
+  bucket_count?: number;
+}
+
+export interface IdentityCenterLogin {
+  session_id: string;
+  user_code: string;
+  verification_uri: string;
+  expires_in: number;
+  interval: number;
+}
+export interface IdentityCenterAccount { account_id: string; account_name: string; email_address?: string }
+export interface IdentityCenterRole { account_id: string; role_name: string }
+
+export const identityCenterApi = {
+  start: (startUrl: string, ssoRegion: string) => invoke<IdentityCenterLogin>('start_identity_center_login', { startUrl, ssoRegion }),
+  openBrowser: (sessionId: string) => invoke<void>('open_identity_center_login', { sessionId }),
+  poll: (sessionId: string) => invoke<{ status: 'pending' | 'authorized'; interval: number }>('poll_identity_center_login', { sessionId }),
+  accounts: (sessionId: string) => invoke<IdentityCenterAccount[]>('list_identity_center_accounts', { sessionId }),
+  roles: (sessionId: string, accountId: string) => invoke<IdentityCenterRole[]>('list_identity_center_roles', { sessionId, accountId }),
+  save: (sessionId: string, accountId: string, roleName: string, name: string, region: string, profileId?: string) => invoke<Profile>('save_identity_center_profile', { sessionId, accountId, roleName, name, region, profileId }),
+  cancel: (sessionId: string) => invoke<void>('cancel_identity_center_login', { sessionId }),
+  signOut: (profileId: string) => invoke<void>('sign_out_identity_center', { profileId }),
+};
+
+// Tauri API wrapper functions
+export const profileApi = {
+  async listProfiles(): Promise<Profile[]> {
+    return invoke<Profile[]>('list_profiles');
+  },
+
+  async getProfile(id: string): Promise<Profile> {
+    return invoke<Profile>('get_profile', { id });
+  },
+
+  async addProfile(profile: Partial<Profile>): Promise<Profile> {
+    return invoke<Profile>('add_profile', { profile });
+  },
+
+  async updateProfile(id: string, profile: Partial<Profile>): Promise<Profile> {
+    return invoke<Profile>('update_profile', { id, profile });
+  },
+
+  async deleteProfile(id: string): Promise<void> {
+    return invoke<void>('delete_profile', { id });
+  },
+
+  async setActiveProfile(id: string): Promise<void> {
+    return invoke<void>('set_active_profile', { id });
+  },
+
+  async getActiveProfile(): Promise<Profile | null> {
+    return invoke<Profile | null>('get_active_profile');
+  },
+
+  async testConnection(profile: Partial<Profile>): Promise<TestConnectionResult> {
+    return invoke<TestConnectionResult>('test_connection', { profile });
+  },
+  
+  async discoverLocalProfiles(): Promise<{ name: string; region?: string; is_sso: boolean }[]> {
+    return invoke<{ name: string; region?: string; is_sso: boolean }[]>('discover_local_profiles');
+  },
+
+  async loginSso(profileName: string): Promise<string> {
+    return invoke<string>('login_sso', { profileName });
+  },
+
+  async checkAwsEnvironment(): Promise<{ has_access_key: boolean; has_secret_key: boolean; has_session_token: boolean; region?: string }> {
+    return invoke('check_aws_environment');
+  },
+};
+
+
+
+// Bucket types matching Rust backend
+export interface BucketInfo {
+  name: string;
+  region: string | null;
+  creation_date: string | null;
+  object_count: number | null;
+  total_size: number | null;
+  total_size_formatted: string | null;
+}
+
+export interface BucketWithRegion {
+  name: string;
+  region: string;
+  creation_date: string | null;
+  object_count: number | null;
+  total_size: number | null;
+  total_size_formatted: string | null;
+}
+
+// Bucket API wrapper functions
+export const bucketApi = {
+  async createBucket(bucketName: string, region: string, expectedProfileId: string): Promise<void> {
+    await invoke<void>('create_bucket', { bucketName, region, expectedProfileId });
+    invalidateCache('buckets');
+  },
+
+  async deleteBucket(bucketName: string, bucketRegion: string, confirmation: string, expectedProfileId: string): Promise<void> {
+    await invoke<void>('delete_bucket', { bucketName, bucketRegion, confirmation, expectedProfileId });
+    invalidateCache('buckets');
+  },
+
+  async getBucketPolicy(bucketName: string, bucketRegion: string, expectedProfileId: string): Promise<string | null> {
+    return invoke<string | null>('get_bucket_policy', { bucketName, bucketRegion, expectedProfileId });
+  },
+
+  async putBucketPolicy(bucketName: string, bucketRegion: string, policy: string | null, expectedPolicy: string | null, expectedProfileId: string): Promise<void> {
+    await invoke<void>('put_bucket_policy', { bucketName, bucketRegion, policy, expectedPolicy, expectedProfileId });
+  },
+
+  async listBuckets(): Promise<BucketInfo[]> {
+    return invoke<BucketInfo[]>('list_buckets');
+  },
+
+  async listBucketsWithRegions(): Promise<BucketWithRegion[]> {
+    return invoke<BucketWithRegion[]>('list_buckets_with_regions');
+  },
+
+  async getBucketRegion(bucketName: string): Promise<string> {
+    return invoke<string>('get_bucket_region', { bucketName });
+  },
+
+  async refreshS3Client(): Promise<void> {
+    return invoke<void>('refresh_s3_client');
+  },
+};
+
+// Object types matching Rust backend
+export interface S3Object {
+  key: string;
+  last_modified: string | null;
+  size: number;
+  storage_class: string | null;
+}
+
+export interface ListObjectsResult {
+  objects: S3Object[];
+  common_prefixes: string[];
+  next_continuation_token: string | null;
+  is_truncated: boolean;
+  prefix: string;
+  bucket_region?: string;
+}
+
+export interface SearchObjectsResult {
+  objects: S3Object[];
+  scanned_objects: number;
+  is_truncated: boolean;
+}
+
+export const objectApi = {
+  async listObjects(
+    bucketName: string,
+    bucketRegion?: string,
+    prefix = '',
+    delimiter = '/',
+    continuationToken?: string,
+    bypassCache = false,
+    sortField?: 'name' | 'size' | 'date' | 'class',
+    sortDirection?: 'asc' | 'desc',
+    expectedProfileId = useProfileStore.getState().activeProfileId
+  ): Promise<ListObjectsResult> {
+    return invoke<ListObjectsResult>('list_objects', { 
+      bucketName, 
+      bucketRegion,
+      prefix: prefix || null, 
+      delimiter: delimiter === undefined ? null : delimiter,
+      continuationToken: continuationToken || null,
+      bypassCache,
+      sortField: sortField || null,
+      sortDirection: sortDirection || null, expectedProfileId
+    });
+  },
+
+  async searchObjects(bucketName: string, bucketRegion: string | undefined, query: string, prefix: string = ''): Promise<SearchObjectsResult> {
+    return invoke<SearchObjectsResult>('search_objects', { bucketName, bucketRegion, query, prefix: prefix || null });
+  },
+
+  async getPresignedUrl(bucketName: string, bucketRegion: string | undefined, key: string, expiresIn: number = 3600): Promise<string> {
+    return invoke<string>('get_presigned_url', { bucketName, bucketRegion, key, expiresIn });
+  },
+
+  async getObjectContent(bucketName: string, bucketRegion: string | undefined, key: string, maxBytes: number): Promise<{ content: string; e_tag: string | null; profile_id: string }> {
+    return invoke<{ content: string; e_tag: string | null; profile_id: string }>('get_object_content', { bucketName, bucketRegion, key, maxBytes });
+  },
+
+  async putObjectContent(bucketName: string, bucketRegion: string | undefined, key: string, content: string, expectedEtag: string, expectedProfileId: string): Promise<string | null> {
+    try {
+      return await invoke<string | null>('put_object_content', { bucketName, bucketRegion, key, content, expectedEtag, expectedProfileId });
+    } finally {
+      invalidateCache();
+    }
+  },
+
+  async getObjectMetadata(bucketName: string, bucketRegion: string | undefined, key: string): Promise<ObjectMetadata> {
+    return invoke<ObjectMetadata>('get_object_metadata', { bucketName, bucketRegion, key });
+  },
+};
+
+export const operationsApi = {
+  async putObject(bucketName: string, bucketRegion: string | undefined, key: string, localPath?: string): Promise<void> {
+    await invoke<void>('put_object', { bucketName, bucketRegion, key, localPath });
+    invalidateCache(); // Auto-refresh after upload
+  },
+
+  async getObject(bucketName: string, bucketRegion: string | undefined, key: string, localPath: string): Promise<void> {
+    return invoke<void>('get_object', { bucketName, bucketRegion, key, localPath });
+  },
+
+  async deleteObject(bucketName: string, bucketRegion: string | undefined, key: string): Promise<void> {
+    await invoke<void>('delete_object', { bucketName, bucketRegion, key });
+    invalidateCache(); // Auto-refresh after delete
+  },
+
+  async copyObject(sourceBucket: string, sourceRegion: string | undefined, sourceKey: string, destinationBucket: string, destinationRegion: string | undefined, destinationKey: string, expectedProfileId = useProfileStore.getState().activeProfileId): Promise<void> {
+    if (!expectedProfileId || expectedProfileId !== useProfileStore.getState().activeProfileId) {
+      throw new Error('The active profile changed. Copy or select the items again.');
+    }
+    try {
+      await invoke<void>('copy_object', { sourceBucket, sourceRegion, sourceKey, destinationBucket, destinationRegion, destinationKey, expectedProfileId });
+    } finally { invalidateCache(); }
+  },
+
+  async moveObject(sourceBucket: string, sourceRegion: string | undefined, sourceKey: string, destinationBucket: string, destinationRegion: string | undefined, destinationKey: string, expectedProfileId = useProfileStore.getState().activeProfileId): Promise<void> {
+    if (!expectedProfileId || expectedProfileId !== useProfileStore.getState().activeProfileId) {
+      throw new Error('The active profile changed. Copy or select the items again.');
+    }
+    try {
+      await invoke<void>('move_object', { sourceBucket, sourceRegion, sourceKey, destinationBucket, destinationRegion, destinationKey, expectedProfileId });
+    } finally { invalidateCache(); }
+  },
+
+  async deleteObjects(bucketName: string, bucketRegion: string | undefined, keys: string[], expectedProfileId = useProfileStore.getState().activeProfileId): Promise<void> {
+    try {
+      await invoke<void>('delete_objects', { bucketName, bucketRegion, keys, expectedProfileId });
+    } finally {
+      invalidateCache();
+    }
+  },
+
+  async getObjectMetadata(bucketName: string, bucketRegion: string | undefined, key: string): Promise<ObjectMetadata> {
+    return invoke<ObjectMetadata>('get_object_metadata', { bucketName, bucketRegion, key });
+  },
+
+  async setObjectContentType(bucketName: string, bucketRegion: string | undefined, key: string, contentType: string): Promise<void> {
+    await invoke<void>('set_object_content_type', { bucketName, bucketRegion, key, contentType });
+    invalidateCache();
+  },
+
+  async getObjectPermissions(bucketName: string, bucketRegion: string | undefined, key: string, isFolder: boolean): Promise<ObjectPermissions> {
+    return invoke<ObjectPermissions>('get_object_permissions', { bucketName, bucketRegion, key, isFolder });
+  },
+
+  async setObjectPermissions(
+    bucketName: string,
+    bucketRegion: string | undefined,
+    key: string,
+    isFolder: boolean,
+    cannedAcl: ObjectCannedAcl
+  ): Promise<SetObjectPermissionsResult> {
+    const result = await invoke<SetObjectPermissionsResult>('set_object_permissions', { bucketName, bucketRegion, key, isFolder, cannedAcl });
+    invalidateCache();
+    return result;
+  },
+};
+
+export interface ObjectMetadata {
+  key: string;
+  size: number;
+  last_modified: string | null;
+  content_type: string | null;
+  e_tag: string | null;
+  storage_class: string | null;
+  user_metadata: Record<string, string>;
+}
+
+export type ObjectCannedAcl =
+  | 'private'
+  | 'public-read'
+  | 'public-read-write'
+  | 'authenticated-read'
+  | 'aws-exec-read'
+  | 'bucket-owner-read'
+  | 'bucket-owner-full-control';
+
+export interface ObjectAclGrant {
+  grantee_type: string | null;
+  display_name: string | null;
+  id: string | null;
+  uri: string | null;
+  email_address: string | null;
+  permission: string | null;
+}
+
+export interface ObjectPermissions {
+  key: string;
+  is_folder: boolean;
+  status: 'available' | 'unsupported' | 'access_denied';
+  message: string | null;
+  owner_display_name: string | null;
+  owner_id: string | null;
+  grants: ObjectAclGrant[];
+  target_count: number;
+}
+
+export interface SetObjectPermissionsResult {
+  affected_count: number;
+}
+
+export interface TransferJob {
+  id: string;
+  profile_id: string;
+  transfer_type: 'Upload' | 'Download';
+  bucket: string;
+  bucket_region: string | null;
+  key: string;
+  local_path: string;
+  total_bytes: number;
+  processed_bytes: number;
+  status: 'Pending' | 'InProgress' | 'Completed' | { Failed: string } | 'Paused' | 'Cancelled';
+  created_at: number; // milliseconds
+  finished_at?: number; // milliseconds
+  parent_group_id?: string;
+  group_name?: string;
+  is_group_root?: boolean;
+}
+
+export interface TransferEvent {
+  job_id: string;
+  processed_bytes: number;
+  total_bytes: number;
+  status: TransferJob['status'];
+  finished_at?: number;
+}
+
+export const transferApi = {
+  async queueUpload(bucketName: string, bucketRegion: string | undefined, key: string, localPath: string, totalBytes: number, expectedProfileId = useProfileStore.getState().activeProfileId): Promise<string> {
+    return invoke<string>('queue_upload', { bucketName, bucketRegion, key, localPath, totalBytes, expectedProfileId });
+  },
+
+  async queueDownload(bucketName: string, bucketRegion: string | undefined, key: string, localPath: string, totalBytes: number, overwrite = false, expectedProfileId = useProfileStore.getState().activeProfileId): Promise<string> {
+    return invoke<string>('queue_download', { bucketName, bucketRegion, key, localPath, totalBytes, overwrite, expectedProfileId });
+  },
+
+  async queueFolderUpload(bucketName: string, bucketRegion: string | undefined, prefix: string, localPath: string, expectedProfileId = useProfileStore.getState().activeProfileId): Promise<number> {
+    return invoke<number>('queue_folder_upload', { bucketName, bucketRegion, prefix, localPath, expectedProfileId });
+  },
+
+  async queueFolderDownload(bucketName: string, bucketRegion: string | undefined, prefix: string, localPath: string, expectedProfileId = useProfileStore.getState().activeProfileId): Promise<number> {
+    return invoke<number>('queue_folder_download', { bucketName, bucketRegion, prefix, localPath, expectedProfileId });
+  },
+
+  async listTransfers(): Promise<TransferJob[]> {
+    return invoke<TransferJob[]>('list_transfers');
+  },
+
+  async cancelTransfer(jobId: string): Promise<boolean> {
+    return invoke<boolean>('cancel_transfer', { jobId });
+  },
+
+  async retryTransfer(jobId: string): Promise<string | null> {
+    return invoke<string | null>('retry_transfer', { jobId });
+  },
+
+  async removeTransfer(jobId: string): Promise<boolean> {
+    return invoke<boolean>('remove_transfer', { jobId });
+  },
+
+  async clearCompletedTransfers(): Promise<number> {
+    return invoke<number>('clear_completed_transfers');
+  },
+
+  async setConcurrency(maxConcurrency: number): Promise<void> {
+    return invoke<void>('set_transfer_concurrency', { maxConcurrency });
+  },
+};

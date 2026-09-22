@@ -1,0 +1,237 @@
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { ListObjectsResult, objectApi, subscribeCacheInvalidation } from '@/lib/tauri';
+import { useProfileStore } from '@/store/profileStore';
+import { useAppStore } from '@/store/appStore';
+import { useSettingsStore } from '@/store/settingsStore';
+import { isProjectShareLocation, useProjectShareStore } from '@/store/projectShareStore';
+
+interface BucketStats {
+  isCached: boolean;
+}
+
+interface UseObjectsResult {
+  data: ListObjectsResult | null;
+  isLoading: boolean;
+  error: string | null;
+  stats: BucketStats;
+  refresh: () => Promise<void>;
+  loadMore: () => Promise<void>;
+  isLoadingMore: boolean;
+  hasMore: boolean;
+}
+
+export function useObjects(
+  bucketName: string,
+  bucketRegion?: string,
+  prefix = '',
+  sortField: 'name' | 'size' | 'date' | 'class' = 'name',
+  sortDirection: 'asc' | 'desc' = 'asc'
+): UseObjectsResult {
+  const [data, setData] = useState<ListObjectsResult | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [stats, setStats] = useState<BucketStats>({ 
+    isCached: false, 
+  });
+  
+  const { activeProfileId } = useProfileStore();
+  const share = useProjectShareStore(state => activeProfileId ? state.shares[activeProfileId] : undefined);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [continuationToken, setContinuationToken] = useState<string | null>(null);
+  const [hasMore, setHasMore] = useState(false);
+  const [cacheRevision, setCacheRevision] = useState(0);
+  
+  const fetchIdRef = useRef(0);
+  const lastDataKeyRef = useRef<string>('');
+  const viewKeyRef = useRef<string>('');
+  const loadedViewKeyRef = useRef<string>('');
+  const fetchInProgress = useRef(false);
+  const loadMoreRequest = useRef<object | null>(null);
+
+  // Core fetch function
+  const fetchItems = useCallback(async (bypassCache = false, background = false) => {
+    if (!bucketName || !activeProfileId) return null;
+    
+    const currentFetchId = ++fetchIdRef.current;
+    loadMoreRequest.current = null;
+    setIsLoadingMore(false);
+    const currentViewKey = JSON.stringify([activeProfileId, bucketName, bucketRegion, prefix, sortField, sortDirection]);
+    const activeRegion = useAppStore.getState().discoveredRegions[bucketName] || bucketRegion;
+    fetchInProgress.current = true;
+    if (!background) {
+      setIsLoading(true);
+      setError(null);
+    }
+
+    const key = currentViewKey;
+    if (key !== lastDataKeyRef.current) {
+        setData(null);
+        lastDataKeyRef.current = key;
+    }
+
+    if (bypassCache && !background) {
+      setContinuationToken(null);
+      setHasMore(false);
+    }
+
+    try {
+      const result = await objectApi.listObjects(bucketName, activeRegion, prefix, '/', undefined, bypassCache, sortField, sortDirection, activeProfileId);
+      
+      // RACING CONDITION FIX:
+      // If a new fetch started while we were awaiting, ignore this result.
+      if (currentFetchId !== fetchIdRef.current || currentViewKey !== viewKeyRef.current || (background && (document.visibilityState !== 'visible' || !navigator.onLine))) {
+          return null;
+      }
+
+      setData(result);
+      setContinuationToken(result.next_continuation_token || null);
+      setHasMore(!!result.next_continuation_token);
+      loadedViewKeyRef.current = currentViewKey;
+
+      if (result.bucket_region) {
+          useAppStore.getState().setDiscoveredRegion(bucketName, result.bucket_region);
+      }
+      
+      return result;
+    } catch (err) {
+      if (currentFetchId !== fetchIdRef.current || currentViewKey !== viewKeyRef.current || (background && (document.visibilityState !== 'visible' || !navigator.onLine))) return null;
+
+      if (process.env.NODE_ENV === 'development') {
+        console.warn(`Failed to load bucket "${bucketName}" with prefix "${prefix}":`, err);
+      }
+      setError(err instanceof Error ? err.message : String(err));
+      return null;
+    } finally {
+      if (currentFetchId === fetchIdRef.current) {
+        setIsLoading(false);
+        fetchInProgress.current = false;
+      }
+    }
+  }, [bucketName, bucketRegion, prefix, activeProfileId, sortField, sortDirection]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const currentKey = JSON.stringify([activeProfileId, bucketName, bucketRegion, prefix, sortField, sortDirection]);
+    
+    viewKeyRef.current = currentKey;
+
+    if (loadedViewKeyRef.current === currentKey) {
+      return;
+    }
+
+    setData(null);
+    setIsLoading(true);
+    setContinuationToken(null);
+    setHasMore(false);
+
+    const run = async () => {
+      await fetchItems(false);
+      if (!cancelled) {
+        setStats({ isCached: true });
+      }
+    };
+
+    run();
+    return () => {
+      cancelled = true;
+      if (viewKeyRef.current === currentKey) {
+        viewKeyRef.current = '';
+      }
+    };
+  }, [bucketName, bucketRegion, prefix, activeProfileId, sortField, sortDirection, fetchItems, cacheRevision]);
+
+  useEffect(() => {
+    return subscribeCacheInvalidation(() => {
+      fetchIdRef.current += 1;
+      fetchInProgress.current = false;
+      loadedViewKeyRef.current = '';
+      lastDataKeyRef.current = '';
+      setData(null);
+      setContinuationToken(null);
+      setHasMore(false);
+      setCacheRevision(revision => revision + 1);
+    });
+  }, []);
+
+  // Refresh only the mounted, visible share. A failed refresh pauses polling until
+  // the user retries; no retry loop repeatedly emits authorization/offline errors.
+  useEffect(() => {
+    if (!share?.autoRefresh || !isProjectShareLocation(share, bucketName, bucketRegion, prefix) || error) return;
+    const timer = window.setInterval(() => {
+      if (document.visibilityState !== 'visible' || !navigator.onLine || fetchInProgress.current || loadMoreRequest.current) return;
+      void fetchItems(true, true);
+    }, 15000);
+    return () => window.clearInterval(timer);
+  }, [share, bucketName, bucketRegion, prefix, error, fetchItems]);
+
+  // Track last fetch time
+  const lastFetchTime = useRef<number>(0);
+
+  // Refresh when tab regains visibility (user returns to app)
+  const autoRefreshOnFocus = useSettingsStore(state => state.autoRefreshOnFocus);
+
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && navigator.onLine && !error && !fetchInProgress.current && !loadMoreRequest.current && bucketName && activeProfileId && autoRefreshOnFocus) {
+        // Only refresh if last fetch was > 30 seconds ago
+        const now = Date.now();
+        if (now - lastFetchTime.current > 30000) {
+          lastFetchTime.current = now;
+          fetchItems(true);
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [bucketName, activeProfileId, fetchItems, autoRefreshOnFocus, error]);
+
+  const loadMore = useCallback(async () => {
+    if (!bucketName || !activeProfileId || !continuationToken || loadMoreRequest.current || fetchInProgress.current) return;
+    
+    const currentViewKey = JSON.stringify([activeProfileId, bucketName, bucketRegion, prefix, sortField, sortDirection]);
+    const activeRegion = useAppStore.getState().discoveredRegions[bucketName] || bucketRegion;
+    const currentFetchId = fetchIdRef.current;
+    const requestToken = continuationToken;
+    const request = {};
+    loadMoreRequest.current = request;
+    setIsLoadingMore(true);
+    setError(null);
+    try {
+       const result = await objectApi.listObjects(bucketName, activeRegion, prefix, '/', requestToken, false, sortField, sortDirection, activeProfileId);
+       if (currentViewKey !== viewKeyRef.current || currentFetchId !== fetchIdRef.current) {
+         return;
+       }
+       setData(prev => {
+         if (!prev) return result;
+         const uniquePrefixes = Array.from(new Set([...prev.common_prefixes, ...result.common_prefixes]));
+         return {
+           ...result,
+           objects: [...prev.objects, ...result.objects],
+           common_prefixes: uniquePrefixes,
+           prefix: prev.prefix
+         };
+       });
+       setContinuationToken(result.next_continuation_token || null);
+       setHasMore(!!result.next_continuation_token);
+    } catch (err) {
+       if (currentViewKey === viewKeyRef.current && currentFetchId === fetchIdRef.current) {
+         setError(err instanceof Error ? err.message : String(err));
+       }
+       console.error('Load more error:', err);
+    } finally {
+       if (loadMoreRequest.current === request) {
+         loadMoreRequest.current = null;
+         setIsLoadingMore(false);
+       }
+    }
+  }, [bucketName, bucketRegion, prefix, activeProfileId, continuationToken, sortField, sortDirection]);
+
+  const refresh = useCallback(async () => {
+    if (!bucketName || !activeProfileId) return;
+    setData(null);
+    await fetchItems(true);
+  }, [bucketName, activeProfileId, fetchItems]);
+
+  return { data, isLoading, error, stats, refresh, loadMore, hasMore, isLoadingMore };
+}

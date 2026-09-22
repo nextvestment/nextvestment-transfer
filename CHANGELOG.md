@@ -1,0 +1,457 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+## [0.2.46] - 2026-09-21
+
+### Added
+- Native AWS Identity Center browser sign-in without AWS CLI or local AWS configuration, with assigned account and role selection.
+- OS-vault storage for native SSO sessions, including bounded credential chunks for Windows Credential Manager.
+- Explicit cancellation, session expiry, reauthentication and sign-out for native connections.
+
+### Fixed
+- Reject cached S3 access after a native session is signed out and bind saved sessions to their selected AWS account and role.
+- Preserve server/client hydration behavior while satisfying the React lint checks.
+
+## [0.2.45] - 2026-09-12
+
+### Added
+- Create buckets, edit bucket policies and delete empty buckets from All Buckets. Destructive actions require the bucket name, and profile changes dismiss pending actions. ([#27](https://github.com/rgcsekaraa/brows3/issues/27))
+- Favorite bucket roots from the sidebar or bucket header. Thanks to @EricERodriguez for the contribution. ([#30](https://github.com/rgcsekaraa/brows3/pull/30), [#31](https://github.com/rgcsekaraa/brows3/issues/31))
+- Unit and component coverage for core features, production browser smoke tests in Chromium and WebKit, and native CI on Linux, macOS and Windows.
+
+### Fixed
+- Keep clipboard, move, search and transfer operations bound to their original profile and bucket.
+- Reject stale sorted-listing cursors without crashing the application. Keep pagination available through empty pages and prevent overlapping requests. ([#28](https://github.com/rgcsekaraa/brows3/issues/28))
+- Commit downloads without overwriting existing files, reject unsafe paths and symlinks, remove interrupted partial files and retain safe destinations on retry.
+- Bound stalled transfers and multipart aborts, scale request timeouts for larger uploads and show provider error details in transfer lists. Thanks to @EricERodriguez for the initial timeout and error improvements. ([#32](https://github.com/rgcsekaraa/brows3/pull/32))
+- Send an explicit signed zero content length when creating folders and preserve custom endpoint errors. Added a Garage v1.0.1 integration check. ([#29](https://github.com/rgcsekaraa/brows3/issues/29))
+- Provide working File and Window commands on Linux where predefined native menu items are unsupported. ([#33](https://github.com/rgcsekaraa/brows3/issues/33))
+- Preserve legacy credentials during migration and write credential files atomically with private permissions.
+- Detect concurrent text edits, preserve object attributes on save and use multipart copy for large objects.
+- Fix transfer scheduling and listener cleanup, refresh views after cache changes and report incomplete deletions.
+- Restore narrow-window navigation, keyboard object selection and clipboard shortcuts. Require an explicit permissions change before applying ACLs.
+- Allow bundled editor fonts and workers, HTTPS media and PDF previews under the desktop content security policy.
+
+### Changed
+- Remove unused assets and build leftovers, organize tests and document local verification.
+- Check desktop packages before uploading release assets, alongside existing updater signature and WinGet manifest validation.
+
+## [0.2.44] - 2026-08-12
+
+### Added
+- **Configurable Text Previews**: Added a persisted 1–100 MB text/HTML/code preview limit in Settings. The backend enforces the selected byte limit while streaming, even when object metadata is missing or incorrect. ([#21](https://github.com/rgcsekaraa/brows3/issues/21))
+- **Audio And Streamed Media Previews**: Added in-app audio playback alongside presigned image, video, and PDF previews; streamed media does not consume the text-preview memory allowance. ([#21](https://github.com/rgcsekaraa/brows3/issues/21))
+- **Content-Type Detection And Editing**: Uploads infer MIME types from object names, edited text objects retain their existing type, and Properties provides a validated free-form Content-Type field with common suggestions. Metadata-only changes preserve tags, user metadata, cache headers, encryption settings, object-lock fields, and ACL grants; objects above 5 GiB use multipart copy. ([#22](https://github.com/rgcsekaraa/brows3/issues/22))
+- **AWS IAM Identity Center Profiles**: Discovered SSO profiles are identified in the profile picker, use the AWS SDK's cached IAM Identity Center credentials, and provide an AWS CLI v2 browser sign-in action with actionable expired-session errors. ([#23](https://github.com/rgcsekaraa/brows3/issues/23))
+
+### Fixed
+- **Readable Command Errors**: Tauri command failures now serialize as their human-readable messages instead of JavaScript displaying `[object Object]`. ([#18](https://github.com/rgcsekaraa/brows3/issues/18))
+- **Large Multipart Uploads**: Files at or above 100 MiB now use retryable, bounded-memory S3 multipart uploads with adaptive part sizing, per-part progress, clean cancellation/abort handling, and support for objects beyond the 5 GiB single-PUT limit. ([#25](https://github.com/rgcsekaraa/brows3/issues/25))
+- **Persistent Linux Secrets**: Linux now explicitly uses the freedesktop Secret Service backend (GNOME Keyring/KWallet) instead of the volatile kernel session keyring, migrates a still-live legacy keyutils secret when possible, and retains the documented local fallback when Secret Service is unavailable. ([#24](https://github.com/rgcsekaraa/brows3/issues/24))
+- **Shared-Profile Custom Endpoints**: AWS shared-config profiles that load `endpoint_url` now use path-style bucket addressing and compatibility checksum behavior, matching Custom Endpoint profiles on MinIO and similar providers. ([#26](https://github.com/rgcsekaraa/brows3/issues/26))
+- **Profile Connection Tests**: Test progress and results now remain visible until the form changes, and stale asynchronous responses cannot overwrite a newer test.
+- **Transfer Profile Isolation**: Queued transfers retain the profile that created them instead of using whichever account is active when a worker starts.
+- **Safe Folder Downloads**: Recursive download paths reject traversal, absolute, rooted, drive-prefixed, and null-containing object keys before joining them to the selected directory.
+- **Bounded Search And Sorting**: Deep search is capped at 100 S3 LIST requests, 100,000 scanned objects, and 10,000 matches, while complete non-default folder sorts are capped at 100 requests and 100,000 entries.
+- **Cache Accuracy**: Removed the unused full-bucket cache implementation, bounded the actual sorted-view cache, and invalidated it after object writes.
+- **Release Signing Workflow**: macOS builds now receive configured Apple signing and notarization secrets, while `[skip release]` suppresses release jobs for maintenance pushes.
+- **Winget Package Continuity**: Release manifests now update the established `Brows3Team.Brows3` package identifier and include both MSI and NSIS installers when available instead of generating a disconnected package identity.
+
+### Changed
+- **Credential Documentation**: Documented the plaintext `secrets.json` fallback used by portable mode or when native keychain storage fails.
+- **Release Quality Gate**: Publishing now waits for frontend linting, TypeScript checks, production export, Rust formatting, Clippy, backend tests, release-script tests, native Windows validation, and a complete signed artifact audit. Updater signatures are fetched through the authenticated asset API, and updater/Winget manifests must use stable tag URLs and verified installer digests; incomplete builds remain unpublished drafts.
+- **Project Cleanup**: Removed unused state, dependencies, starter assets, and historical build logs.
+
+## [0.2.43] - 2026-06-25
+
+### Added
+- **File and Folder Permissions**: Added a Permissions action for files and folders that reads S3 object ACL grants and applies canned ACLs. Folder permissions apply recursively to objects under the selected prefix.
+- **ACL Compatibility Handling**: Permissions now clearly reports when a bucket or S3-compatible provider does not support ACLs, has Object Ownership ACLs disabled, or denies ACL access.
+
+### Fixed
+- **Large Bucket Sorting**: Sorting by modified date, size, storage class, or reverse name now orders the full S3 prefix before paginating results, so buckets with more than 1000 objects no longer sort only the currently loaded page.
+- **Deep Search Completeness**: Deep search now scans the full selected prefix instead of stopping at cached or arbitrary page limits, and surfaces mid-search S3 errors rather than returning incomplete results.
+- **Windows Paste Duplication**: Fixed duplicated text when pasting credentials into connection forms in the Tauri desktop WebView.
+- **Winget Manifest Reliability**: Winget manifest generation now prefers the MSI installer, falls back to NSIS only when MSI is unavailable, and emits current schema `1.12.0` manifests for release attachments.
+
+## [0.2.42] - 2026-06-14
+
+### Changed
+- **Generic S3-Compatible Setup**: Removed the STACKIT-specific provider preset from the profile dialog so custom endpoints remain provider-neutral.
+- **STACKIT Documentation**: Added README setup instructions for using STACKIT Object Storage through Custom S3 / Compatibility Mode with endpoint `https://object.storage.eu01.onstackit.cloud` and region `eu01`.
+
+## [0.2.41] - 2026-06-14
+
+### Added
+- **STACKIT Object Storage Preset**: Added STACKIT Object Storage EU01 as a built-in S3-compatible profile preset using `https://object.storage.eu01.onstackit.cloud` and region `eu01`.
+- **Winget Manifest Generation**: Releases now attach winget manifest YAML generated from the actual Windows installer URL and SHA256 digest.
+
+### Fixed
+- **Wasabi Upload Compatibility**: Custom S3-compatible endpoints now only request payload checksums when required, avoiding optional checksum/trailer behavior that can stall or fail uploads on Wasabi and similar providers.
+
+## [0.2.40] - 2026-06-02
+
+### Added
+- **Diagnostic Log Access**: Settings now shows the desktop log file path with a copy action, and startup logs include app version, platform, and log path details for easier issue reports.
+
+### Fixed
+- **Panic Diagnostics**: Panic logging now records the panic location and a backtrace in the fallback panic log instead of only writing the raw panic payload.
+
+## [0.2.39] - 2026-06-01
+
+### Fixed
+- **Linux AppImage Wayland Library Startup**: Linux AppImage builds now preload the host `libwayland-client` when available so rolling-release systems such as CachyOS/Arch do not crash on startup because the bundled Ubuntu Wayland client library wins library resolution.
+
+## [0.2.38] - 2026-05-31
+
+### Fixed
+- **Linux AppImage EGL Startup Failure**: Disabled WebKitGTK's DMABUF renderer by default on Linux when no override is set, preventing `Could not create default EGL display: EGL_BAD_PARAMETER` crashes on CachyOS/Arch-style setups.
+
+## [0.2.37] - 2026-05-29
+
+### Fixed
+- **Linux AppImage White Screen**: Relaxed the Tauri script CSP to allow the inline hydration scripts generated by the exported Next.js app, fixing a blank startup window on Linux WebKitGTK builds.
+
+## [0.2.36] - 2026-05-27
+
+### Fixed
+- **S3-Compatible Folder Delete**: Folder deletion now falls back to per-object deletes when an S3-compatible provider rejects the multi-object delete request, fixing recursive folder deletion on SwiftStack-style storage.
+
+## [0.2.35] - 2026-05-23
+
+### Fixed
+- **Profile Secret Preservation**: Editing a profile between manual credentials and custom S3-compatible endpoints now preserves the saved secret when the update payload omits it, and only clears stored secrets when switching to a non-secret authentication method.
+- **Windows TLS Startup Stability**: Updated the AWS SDK runtime stack to remove the rustls native-root debug assertion path without replacing the operating system trust store.
+
+## [0.2.34] - 2026-04-08
+
+### Fixed
+- **Unreadable Object Protection**: The backend now rejects invalid UTF-8 and obvious binary payloads instead of lossy-decoding them into the text editor, preventing accidental corruption of non-text objects.
+- **Object Editability Detection**: Ambiguous object names no longer depend on a giant text-extension allowlist. `content-type` stays authoritative, and unknown names fall back safely without blocking valid text objects that have uncommon or no suffixes.
+
+## [0.2.33] - 2026-04-08
+
+### Fixed
+- **Cross-Platform Installer Reliability**: Windows installers now bundle the WebView2 runtime offline, reducing install failures on fresh systems.
+- **Release Pipeline Stability**: Reworked GitHub release publishing to upload generated bundles directly and keep the shipped version aligned with the repo version instead of the workflow run number.
+- **Updater Signing Alignment**: Updated the Tauri updater public key to match the newly rotated release signing key used in GitHub Actions.
+- **Startup Update Flow**: Prevented automatic update installation during app launch so updater checks no longer race the UI or installer flow.
+- **Windows Profile Persistence**: Replaced the failing save path on Windows with a cross-platform-safe write strategy so saved profiles are not lost on restart.
+- **Profile Secret Preservation**: Editing an existing manual or custom-endpoint profile now preserves previously saved secrets when the edit payload omits them.
+- **Default Profile State Sync**: Active/default profile flags now stay consistent after add, edit, delete, and restart flows.
+
+## [0.2.32] - 2026-04-08
+
+### Added
+- **Presigned URL Sharing**: Added a dedicated "Get Presigned URL" action in the bucket object menu for files, with configurable expiry presets and custom durations.
+
+### Fixed
+- **Custom S3 Profile Persistence**: Profiles saved without inline secrets now load correctly on startup instead of being discarded when `profiles.json` is parsed.
+- **Saved Secret Hydration**: Opening an existing manual or Custom S3 profile now repopulates the saved secret from secure storage in the edit form.
+- **Profile Startup Race**: Credentials/profile state is now initialized before frontend commands run, preventing empty-profile startup races on slower launches.
+- **macOS Distribution Path**: Added ad-hoc signing fallback in Tauri config and optional Apple signing/notarization credential support in CI to reduce "app is damaged" install failures on macOS releases.
+- **Release Workflow Looping**: Prevented bot-authored `update.json` commits from retriggering the publish workflow and added retries/fail-fast checks around release asset discovery.
+- **CI Release Stability**: macOS CI now builds the updater-compatible app bundle directly instead of DMG packaging, and GitHub Actions dependencies were updated for the Node 24 runner transition.
+- **Presigned URL Validation**: Prevented invalid expiry values above the AWS 7-day limit from attempting a presign request.
+- **Release Workflow Diagnostics**: Improved signing-key checks and asset matching logs in the release workflow to make updater failures easier to diagnose.
+- **Updater Key Alignment**: Updated the Tauri updater public key to match the regenerated signing key used for releases.
+
+## [0.2.31] - 2026-01-23
+
+### Fixed
+- **Auto-Update Signing**: Regenerated signing keys without password to fix signature verification issues.
+
+## [0.2.30] - 2026-01-23
+
+### Fixed
+- **Dynamic Version in Footer**: Footer now fetches version dynamically from Tauri API instead of hardcoded value. Version will always be correct after updates.
+- **Auto-Update Signatures**: Enabled `includeUpdaterJson` in release workflow to upload `.sig` files for auto-update functionality.
+
+## [0.2.29] - 2026-01-23
+
+### Fixed
+- **Auto-Update Signatures**: Enable `includeUpdaterJson: true` in release workflow to ensure `.sig` files are uploaded to releases, fixing auto-update on all platforms.
+
+## [0.2.28] - 2026-01-22
+
+### Fixed
+- **Auto-Update for All Platforms**: Regenerated Tauri signing keys to enable auto-update functionality. Updates will now work properly on macOS, Windows, and Linux.
+
+## [0.2.27] - 2026-01-22
+
+### Fixed
+- **Ubuntu Checkbox Stability (Final Fix)**: Created custom `StyledCheckbox` component replacing all MUI Checkbox usage:
+  - Uses pure CSS/SVG styling with fixed 14x14px SVG container
+  - All states (unchecked/checked/indeterminate) use same layout to prevent shifts
+  - Removed MUI Checkbox from VirtualizedObjectTable and bucket page
+  - No animations or transitions that could crash WebKitGTK
+
+## [0.2.26] - 2026-01-22
+
+### Fixed
+- **Ubuntu Checkbox Crash (Take 2)**: Replaced MUI Checkbox component with native HTML checkboxes in the object table. MUI's Checkbox uses complex SVG rendering and animations that overwhelm WebKitGTK on Ubuntu. Native checkboxes have minimal DOM operations and are fully stable.
+
+## [0.2.25] - 2026-01-22
+
+### Fixed
+- **Ubuntu Crash on Multiple Checkbox Selection**: Critical fix for WebKitGTK crash when clicking multiple checkboxes in the object table. Root cause was `useMemo` recreating the Virtuoso context object on every selection change, triggering a full re-render cascade that overwhelmed WebKitGTK. Fixed by using a stable `useRef` pattern that maintains the same context object identity across renders.
+
+## [0.2.24] - 2026-01-21
+
+### Fixed
+- **Ubuntu Crash on Checkbox Click**: Critical fix for WebKitGTK crashes when selecting items. Disabled MUI checkbox ripple effects and CSS transitions that were overwhelming the GPU compositor.
+- **Ubuntu Flickering on Selection**: Refactored `VirtualizedObjectTable` to use `react-virtuoso`'s `context` prop for stable row rendering. Selection state no longer causes full callback recreation.
+- **App Freezing on Window Return**: Disabled aggressive auto-refresh on focus by default. Added smart throttling to `useTransferEvents` - progress updates are paused when hidden but terminal events (Complete/Failed) always process.
+- **Editor Save Button State**: Properly tracks Monaco Editor's internal version ID for accurate undo/redo detection.
+- **Folder Copy Not Recursive**: Backend `copy_object` now recursively copies all nested objects when copying a folder.
+- **Transfer Progress CPU Storm**: Bucket page no longer re-renders on every transfer progress tick (was 60fps). Uses `subscribe` instead of reactive state.
+
+### Changed
+- **Removed FreezeDetector**: The auto-reload component was removed as it was causing disruptive reloads instead of helping.
+- **Removed Format Button**: Removed the Format button from the editor dialog as requested.
+- **Auto-Refresh Off by Default**: `autoRefreshOnFocus` is now disabled by default in settings to prevent freezes.
+
+### Improved
+- **Release Workflow**: Enhanced `update.json` generation with better asset matching, debugging output, and support for x64/x86_64 naming variations.
+
+## [0.2.22] - 2026-01-20
+
+### Fixed
+- **Recursive Folder Delete**: True recursive deletion implemented. Bypassing cache and proper delimiter handling ensures all nested files and subfolders are fully removed.
+- **Selection State Persistence**: Folders and files are now automatically deselected when navigating between different bucket paths or prefixes.
+- **UI Polish - Table Headers**: Fixed an issue where table headers would disappear during the loading/refresh state.
+- **Delete Action Reliability**: Fixed a bug where confirming a delete action from the context menu would sometimes fail to trigger the operation.
+- **Dependencies**: Aligned `@tauri-apps/plugin-dialog` NPM package version with the Rust crate to resolve build failures.
+
+## [0.2.21] - 2026-01-20
+
+### Fixed
+- **Modal Close Button**: Removed spinning animation on close button hover for cleaner UI.
+- **Preview File Size Limit**: Added 2MB limit for text file previews to prevent browser freeze on large files.
+- **Folder Rename Warning**: Added warning when renaming folders that will affect all contained objects.
+
+### Changed
+- **Comprehensive Codebase Audit**: Completed full file-by-file scan of 59 files (43 frontend + 16 backend). No critical bugs found.
+
+## [0.2.20] - 2026-01-17
+
+### Added
+- **Periodic Transfer Sync**: Transfer state now syncs with backend every 5 seconds for consistency.
+- **Visibility-Based Refresh**: Buckets and objects auto-refresh when returning to app (with 30s debounce).
+
+### Fixed
+- **Transfer Panel State**: Panel hidden state now persists across page navigation.
+- **Profile Loading Race**: Removed duplicate profile loading between AppShell and ProfileSelector.
+- **useEffect Dependencies**: Fixed missing/stale dependencies in bucket page and useTransferEvents.
+- **Transfer Event Stability**: Event listeners now use refs to prevent unnecessary re-subscriptions.
+
+## [0.2.19] - 2026-01-17
+
+### Added
+- **Auto-Edit Mode**: Clicking "Edit" on a file now opens it directly in edit mode (no extra click required).
+- **Freeze Detection & Recovery**: App automatically detects UI freezes and auto-reloads to recover.
+
+### Improved
+- **Simplified Navigation**: Removed redundant "Buckets" nav item, renamed "Explorer" to "Home".
+- **Tab Management**: Fixed tab deduplication so clicking Home/nav items switches to existing tabs instead of creating duplicates.
+- **Search Experience**: Deep search now has 30-second timeout, shows "No Results" toast, and proper error messages.
+- **Transfer Panel**: Moved panel up from bottom edge to be visible above footer.
+- **Toast Notifications**: File save success now shows as toast instead of inline Alert.
+
+### Fixed
+- **Search [object object] Error**: Fixed improper error string conversion in search error display.
+
+## [0.2.18] - 2026-01-16
+
+### Fixed
+- **Unused Imports Cleanup**: Removed 7 unused icon imports and `getCurrentWindow` from TopBar component for smaller bundle size.
+- **React Anti-pattern**: Fixed calling `getState()` during render in AppShell which could cause stale UI.
+- **Error Handling**: Fixed type check order in Tauri invoke wrapper so Error messages are properly extracted.
+- **Hook Dependencies**: Removed stale dependencies from `useObjects` refresh callback.
+- **Transfer Panel**: Added missing `TransferPanel` component render so users can now see file transfer progress.
+ 
+## [0.2.17] - 2026-01-15
+ 
+### Added
+- **Actionable Toasts**: Transfer "Queued" notifications now include a "View" button to instantly navigate to the relevant Downloads or Uploads page.
+- **Improved Linux Support**: Added high-resolution (512x512) app icon for pixel-perfect rendering on Ubuntu/Linux desktops.
+- **Download Controls**: Added consistent "Retry" and "Cancel" actions for download jobs.
+
+### Fixed
+- **Large Download Freeze**: Resolved critical UI freeze when downloading large files (10GB+) by implementing smart progress event throttling.
+- **Sidebar Loading Glitch**: Fixed a race condition where rapidly switching buckets could display incorrect data from stale network requests.
+- **Table Stability**: Fixed layout shifts and indentation issues in transfer tables (Downloads/Uploads) for a rock-solid UI.
+
+## [0.2.16] - 2026-01-14
+ 
+### Added
+- **Custom App Icon**: New premium goose mascot branding across app icon, header, and About dialog.
+- **Instant Theme Switching**: Removed all transition delays for snappy dark/light mode toggling.
+
+### Improved
+- **Light Mode Contrast**: Darkened primary orange and increased sidebar selection/hover opacity for better visibility.
+- **Tab Close Button**: Enlarged close button (16px) for easier clicking.
+- **About Dialog**: Streamlined by removing developer/usage info sections.
+
+### Fixed
+- **Transfer Panel**: Added Started, Finished, and Elapsed time columns with correct timestamps.
+- **Uploads Page**: Applied same time column improvements and verified grouping logic.
+
+## [0.2.15] - 2026-01-13
+ 
+### Added
+- **macOS Troubleshooting Guide**: Added prominent documentation and in-app markers for bypassing Gatekeeper "Damaged App" errors on non-notarized builds.
+- **Improved README**: Included immediate workaround commands for macOS users directly in the main repository page.
+
+## [0.2.14] - 2026-01-13
+ 
+### Added
+- **Deep Search Overhaul**: Increased recursive search depth by 5x (scans up to 50,000 objects). Added context-aware prefix support and robust region auto-retry logic for exhaustive searching.
+- **Tab Deduplication**: The search bar now intelligently switches to existing tabs if the target path is already open, preventing workspace clutter.
+
+### Fixed
+- **Application Stability**: Resolved critical `TypeError` crashes during navigation by implementing mandatory `Suspense` boundaries for Next.js layouts.
+- **Enhanced Safety**: Added defensive null-checks for search parameters and default props for virtualization tables to eliminate "Load failed" errors.
+- **State Cleanup**: Implemented global reset logic when deleting profiles, ensuring all tabs, history, and regions are cleared for a clean slate.
+
+## [0.2.13] - 2026-01-13
+ 
+### Added
+- **Automatic Region Discovery**: Profiles imported from generic `~/.aws/config` files now automatically detect and select the correct region, eliminating manual configuration.
+- **Direct Object Navigation**: Support for pasting direct S3 file URIs (e.g., `s3://bucket/file.json`). The app intelligently distinguishes between files and folders without forcing trailing slashes.
+- **Extended File Support**: Massive expansion of supported editable file types. Now supports editing and previewing for YAML, TOML, INI, Shell Scripts, Rust, Go, Python, Terraform, Dockerfiles, and many more.
+
+## [0.2.12] - 2026-01-12
+ 
+### Added
+- **Direct Edit Action**: Added "Edit" icon to the file list and dedicated "Edit" option in context menu for text-based files.
+- **Developer Information**: Added developer details and quick-start instructions to the "About" dialog.
+ 
+### Fixed
+- **Window Management**: Application now launches in a maximized state by default for immediate full-screen productivity.
+- **Connection Test Reliability**: Fixed a bug where connection tests would continue running even after changing form values. Tests now automatically reset on any input change.
+- **Modal Scrollability**: Fixed layout issue where the "Create Profile" modal was not scrollable on smaller screens or minimized windows.
+- **File Editing**: Resolved issues with the in-app editor not saving correctly and improved state management for file previews.
+ 
+## [0.2.11] - 2026-01-12
+
+### Fixed
+- **Release Automation**: Updated workflow to automatically extract changelog notes for GitHub Releases.
+- **Linux Window Controls**: Added native file/window menus for Linux to improve window manager integration and address potential close button responsiveness issues.
+
+## [0.2.10] - 2026-01-12
+
+### Fixed
+- **Restricted Prefix Navigation**: Fixed manual path navigation (`Ctrl+Shift+P`) to correctly use the active profile's region. This enables users to jump directly to specific S3 folders (e.g., `s3://bucket/prefix/`) even if they don't have permission to list the bucket root.
+- **S3 Error Logging**: (Included) The fix for opaque error logging (`[object Object]`) is now properly included in this release.
+
+## [0.2.9] - 2026-01-12
+
+### Fixed
+- **S3 Error Logging**: Fixed opaque error messages (previously showing as `[object Object]`) when accessing restricted buckets. Now correctly displays "Access Denied" or other backend errors to help with debugging permissions.
+## [0.2.7] - 2026-01-10
+
+### Fixed
+- **Connection Setup Error**: Fixed "Cannot read properties of undefined (reading 'invoke')" error on the new connection setup page when running in web context. The Tauri invoke function is now dynamically imported only when running inside the Tauri desktop application.
+
+## [0.2.6] - 2026-01-10
+
+### Fixed
+- **Auto-Update Not Working**: Fixed the `update.json` manifest generation in GitHub Actions workflow. The previous version had a bash subshell bug that caused platform URLs and signatures to not be populated. Auto-update should now work correctly on all platforms (macOS, Windows, Linux).
+
+## [0.2.5] - 2026-01-10
+
+## [0.2.4] - 2026-01-10
+
+### Fixed
+- **All Buckets Page Refresh**: Fixed loading skeleton not showing during refresh - now properly displays loading state when clicking Refresh.
+- **Bucket View Refresh**: Fixed skeleton overlay visibility issue in bucket content view.
+- **Footer Version**: Updated footer to display correct version number.
+
+### Performance
+- **Transfer Store Optimization**: Skip state updates when transfer progress hasn't changed, reducing unnecessary re-renders during heavy file transfers.
+- **Icon Caching**: Pre-populated icon map with 47 file type icons for O(1) lookup instead of creating JSX elements on every render.
+- **useBuckets**: Removed unnecessary `useMemo` wrapper from trivial cache age calculation.
+
+### Changed
+- **MUI Stock Experience**: Reverted to stock Material UI styling for menus, buttons, and inputs instead of heavy customizations for a more consistent and familiar UI.
+
+## [0.2.3] - 2026-01-09
+
+### Fixed
+- **Bucket Refresh**: Fixed refresh button not showing loading state. Now clears data immediately and properly refreshes from S3.
+- **Backend Cache Invalidation**: Implemented `remove_bucket_cache` in Rust backend to properly clear stale data on refresh.
+
+### Changed
+- **UI Polish - Less Rounding**: Reduced border-radius across the app for a cleaner look:
+  - Buttons: 8px → 6px with smaller padding
+  - Inputs: 8px → 6px
+  - Dropdown menus: 8px with compact items (8px 12px padding)
+- **Navbar Dropdown**: Added visible outlined border to Profile Selector dropdown trigger.
+- **Dropdown Styling**: Fixed invisible dropdown issue, added proper shadows and borders.
+- **Compact Fonts**: Reduced font sizes across dropdowns and buttons (0.8125rem).
+
+
+## [0.2.2] - 2026-01-08
+
+### Fixed
+- **PathBar Navigation**: Fixed invalid URL handling - now shows error toast and prevents navigation instead of loading existing buckets
+- **Bucket Error Handling**: Added graceful error UI when bucket is not found, with helpful actions ("Back to Home" and "Try Again")
+- **React Key Warnings**: Resolved React key prop warnings in PathBar autocomplete component
+- **Console Logging**: Reduced console noise - fetch errors now only log in development mode with cleaner formatting
+- **Copy Options**: Properly separated copy menu items:
+  - **Copy Filename**: Copies just the filename with extension (e.g., `file.txt`)
+  - **Copy Key**: Copies the S3 key path (e.g., `folder/subfolder/file.txt`)
+  - **Copy S3 URI**: Copies full S3 URI (e.g., `s3://bucket-name/folder/file.txt`)
+- **Page Scrolling**: Fixed overflow and scrolling issues in Recent and Favorites pages
+
+### Changed
+- **Layout Consistency**: Unified spacing across all pages:
+  - Recent, Favorites, Downloads, Uploads now use full width (removed 800px maxWidth)
+  - Reduced padding from `3` to `1` with top margin for consistency
+  - All pages now have icon + title header layout (added StorageIcon to Buckets page)
+  - Fixed scrolling behavior with proper flex and overflow properties
+- **Main Content Spacing**: Added horizontal padding (px: 2) to main content area for better breathing room
+- **PathBar UI**: Reduced search bar width (600px → 450px) and improved centering in navbar with balanced spacing
+
+## [0.2.1] - 2026-01-08
+
+### Fixed
+- **Auto-Update**: Fixed missing release signatures in v0.2.0 which prevented auto-updates.
+- **Build**: Resolved typescript build errors in recent/page.tsx.
+
+## [0.2.0] - 2026-01-08
+
+### Added
+- **Deep Recursive Search**: New search capabilities in the bucket view. Toggle between instant local filtering and a deep, server-side recursive search of the entire bucket.
+- **System Monitor**: Added a dedicated monitoring section in Settings to track API request rates, failures, and view live logs.
+- **In-App PDF Preview**: Native PDF viewing support using the `<embed>` tag with toolbar controls hidden for a cleaner reading experience.
+- **Profile Management**: Complete support for AWS Profiles. Switch between accounts/profiles instantly via the top bar.
+- **Copy Filename**: Added context menu action to copy just the filename of an object.
+- **Paste Logic**: Improved paste functionality. Pasting a file into the same folder now auto-renames it with a timestamp to prevent accidental overwrites.
+
+### Changed
+- **UI Polish**:
+  - Compacted the "Deep Search" toggle to a clean checkbox.
+  - Fixed "Size" column in file tables to prevent text wrapping (e.g., "53.6 KB" stays on one line).
+  - Updated "About" modal styles and fixed links.
+- **PDF Rendering**: Switched from `iframe` to `<embed>` for better cross-platform compatibility and stricter `Content-Type` enforcement in the backend.
+- **Performance**: Optimized S3 listing with smart caching and background indexing.
+
+### Fixed
+- **App Persistence**: Fixed a critical issue where the application would reset to the "Setup" screen on every restart. Local state is now correctly rehydrated on launch.
+- **Floating UI Elements**: Corrected layout issues in the Settings page where icons appeared misaligned.
+- **Build System**: Improved Windows MSI build reliability and cross-platform compilation scripts.
+
+## [0.1.0] - Initial Release
+
+- Initial public release of Brows3.
+- Core S3 file browsing features.
+- High-performance virtualized table.
+- Monocle editor integration.

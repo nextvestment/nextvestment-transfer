@@ -1,0 +1,74 @@
+[
+  {
+    "step": 1,
+    "file": "/screenshots/website/dark/01-start-no-profile.png",
+    "title": "Start by connecting an account",
+    "alt": "Brows3 dark mode welcome screen prompting the user to connect an S3 account or S3-compatible storage provider"
+  },
+  {
+    "step": 2,
+    "file": "/screenshots/website/dark/02-create-profile-empty-state.png",
+    "title": "Open cloud profile setup",
+    "alt": "Cloud Profiles dialog in dark mode with an empty state and Create New Profile button"
+  },
+  {
+    "step": 3,
+    "file": "/screenshots/website/dark/03-add-custom-s3-profile.png",
+    "title": "Add AWS or S3-compatible storage",
+    "alt": "New Cloud Connection form showing Custom S3 compatibility mode with endpoint URL, access key, secret key, and default region fields"
+  },
+  {
+    "step": 4,
+    "file": "/screenshots/website/dark/04-direct-s3-path.png",
+    "title": "Jump directly to any S3 path",
+    "alt": "Brows3 direct access screen with an S3 URI input for opening a bucket or prefix"
+  },
+  {
+    "step": 5,
+    "file": "/screenshots/website/dark/05-bucket-discovery.png",
+    "title": "Browse all buckets",
+    "alt": "All Buckets view listing S3 buckets with region, creation date, and total size columns"
+  },
+  {
+    "step": 6,
+    "file": "/screenshots/website/dark/06-browse-bucket-root.png",
+    "title": "Explore a bucket root",
+    "alt": "Bucket object browser showing root folders and files in a virtualized table"
+  },
+  {
+    "step": 7,
+    "file": "/screenshots/website/dark/07-browse-folder-actions.png",
+    "title": "Manage folders and objects",
+    "alt": "Folder object browser with search, deep search, new folder, upload, preview, edit, and object action controls"
+  },
+  {
+    "step": 8,
+    "file": "/screenshots/website/dark/08-search-current-folder.png",
+    "title": "Search within the current folder",
+    "alt": "Object browser filtered by a search query to find JSON files in the current S3 folder"
+  },
+  {
+    "step": 9,
+    "file": "/screenshots/website/dark/09-uploads-queue.png",
+    "title": "Track uploads",
+    "alt": "Uploads page showing active, pending, and completed upload transfer jobs"
+  },
+  {
+    "step": 10,
+    "file": "/screenshots/website/dark/10-downloads-queue.png",
+    "title": "Track downloads",
+    "alt": "Downloads page showing active and completed download transfer jobs with progress"
+  },
+  {
+    "step": 11,
+    "file": "/screenshots/website/dark/11-settings-and-updates.png",
+    "title": "Tune settings and updates",
+    "alt": "Settings page with theme, default region, transfer concurrency, cache clearing, update checks, and system monitor"
+  },
+  {
+    "step": 12,
+    "file": "/screenshots/website/dark/12-profile-management.png",
+    "title": "Manage saved profiles",
+    "alt": "Cloud Profiles dialog showing an active S3-compatible profile and profile management actions"
+  }
+]

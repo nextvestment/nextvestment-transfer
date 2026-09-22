@@ -1,0 +1,866 @@
+'use client';
+
+import { useCallback, useState, useEffect, useRef } from 'react';
+import { useTheme, alpha } from '@mui/material';
+import { useSettingsStore } from '@/store/settingsStore';
+import {
+  Alert,
+  Box,
+  Button,
+  CircularProgress,
+  FormControl,
+  IconButton,
+  InputLabel,
+  List,
+  ListItem,
+  ListItemButton,
+  ListItemIcon,
+  ListItemSecondaryAction,
+  ListItemText,
+  MenuItem,
+  Select,
+  TextField,
+  Typography,
+  Autocomplete,
+  Paper,
+  Fade,
+  Tooltip,
+  Chip,
+} from '@mui/material';
+import {
+  Add as AddIcon,
+  Delete as DeleteIcon,
+  Edit as EditIcon,
+  Check as CheckIcon,
+  Cloud as CloudIcon,
+  Dns as ProfileIcon,
+  Public as RegionIcon,
+} from '@mui/icons-material';
+import { Profile, CredentialType, profileApi, TestConnectionResult, bucketApi, invalidateCache } from '@/lib/tauri';
+import { useProfileStore } from '@/store/profileStore';
+import { useAppStore } from '@/store/appStore';
+import { useHistoryStore } from '@/store/historyStore';
+import { useClipboardStore } from '@/store/clipboardStore';
+import { toast } from '@/store/toastStore';
+import { useRouter } from 'next/navigation';
+import IdentityCenterSetup from './IdentityCenterSetup';
+import { BaseDialog } from '../common/BaseDialog';
+import { invalidateBucketCache } from '@/hooks/useBuckets';
+
+const AWS_REGIONS = [
+  'auto',
+  'us-east-1', 'us-east-2', 'us-west-1', 'us-west-2',
+  'af-south-1',
+  'ap-east-1', 'ap-east-2',
+  'ap-south-1', 'ap-south-2',
+  'ap-northeast-1', 'ap-northeast-2', 'ap-northeast-3',
+  'ap-southeast-1', 'ap-southeast-2', 'ap-southeast-3', 'ap-southeast-4',
+  'ap-southeast-5', 'ap-southeast-6', 'ap-southeast-7',
+  'ca-central-1', 'ca-west-1',
+  'eu-central-1', 'eu-central-2',
+  'eu-west-1', 'eu-west-2', 'eu-west-3',
+  'eu-south-1', 'eu-south-2', 'eu-north-1',
+  'il-central-1',
+  'mx-central-1',
+  'me-south-1', 'me-central-1',
+  'sa-east-1',
+  'us-gov-east-1', 'us-gov-west-1',
+];
+
+type CredentialTypeKey = 'IdentityCenter' | 'Environment' | 'SharedConfig' | 'Manual' | 'CustomEndpoint';
+
+type ProfileFormData = {
+  name: string;
+  credentialType: CredentialTypeKey;
+  region: string;
+  profileName: string;
+  accessKeyId: string;
+  secretAccessKey: string;
+  endpointUrl: string;
+};
+
+type DiscoveredProfile = { name: string; region?: string; is_sso: boolean };
+
+interface ProfileDialogProps {
+  open: boolean;
+  onClose: () => void;
+  editProfile?: Profile | null;
+}
+
+export default function ProfileDialog({ open, onClose, editProfile }: ProfileDialogProps) {
+  const router = useRouter();
+  const theme = useTheme();
+  const { profiles, activeProfileId, addProfile, updateProfile, setActiveProfileId } = useProfileStore();
+  const { resetApp, clearDiscoveredRegions } = useAppStore();
+  const { clearHistory } = useHistoryStore();
+  const { clear: clearClipboard } = useClipboardStore();
+  const { defaultRegion } = useSettingsStore();
+  
+  const [mode, setMode] = useState<'list' | 'add' | 'edit'>('list');
+  const [formData, setFormData] = useState<ProfileFormData>({
+    name: '',
+    credentialType: 'IdentityCenter' as CredentialTypeKey,
+    region: 'us-east-1',
+    profileName: 'default',
+    accessKeyId: '',
+    secretAccessKey: '',
+    endpointUrl: '',
+  });
+  const [testResult, setTestResult] = useState<TestConnectionResult | null>(null);
+  const [testing, setTesting] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [signingInSso, setSigningInSso] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [selectedProfile, setSelectedProfile] = useState<Profile | null>(null);
+  const [discoveredProfiles, setDiscoveredProfiles] = useState<DiscoveredProfile[]>([]);
+  const [awsEnv, setAwsEnv] = useState<{ has_access_key: boolean; has_secret_key: boolean; has_session_token: boolean; region?: string } | null>(null);
+  const discoveryRequestIdRef = useRef(0);
+  const editLoadRequestIdRef = useRef(0);
+  const testRequestIdRef = useRef(0);
+
+  // Discover local profiles and check environment
+  useEffect(() => {
+    if (open) {
+        const requestId = ++discoveryRequestIdRef.current;
+        const fetchData = async () => {
+            try {
+                const [discovered, env] = await Promise.all([
+                    profileApi.discoverLocalProfiles(),
+                    profileApi.checkAwsEnvironment()
+                ]);
+
+                if (requestId !== discoveryRequestIdRef.current) {
+                    return;
+                }
+                
+                setDiscoveredProfiles(discovered);
+                setAwsEnv(env);
+                
+                // Smart default: If we are in "add" mode and haven't started typing a name yet
+                if (mode === 'add' && !formData.name && !editProfile) {
+                    if (env.has_access_key) {
+                        setFormData((prev) => ({ ...prev, credentialType: 'Environment', name: 'Environment Credentials' }));
+                    } else if (discovered.length > 0) {
+                        const defaultProf = discovered.find((p) => p.name === 'default') || discovered[0];
+                        setFormData((prev) => ({
+                            ...prev,
+                            credentialType: 'SharedConfig',
+                            profileName: defaultProf.name,
+                            region: defaultProf.region || prev.region,
+                            name: `Local AWS (${defaultProf.name})`
+                        }));
+                    }
+                }
+            } catch (err) {
+                if (requestId === discoveryRequestIdRef.current) {
+                  setError(err instanceof Error ? err.message : String(err));
+                }
+            }
+        };
+        
+        fetchData();
+    }
+
+    return () => {
+      discoveryRequestIdRef.current += 1;
+    };
+  }, [open, mode, editProfile, formData.name]);
+
+  const updateField = <K extends keyof ProfileFormData>(field: K, value: ProfileFormData[K]) => {
+    setFormData((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const resetForm = useCallback(() => {
+    setFormData({
+      name: '',
+      credentialType: 'IdentityCenter',
+      region: defaultRegion || 'us-east-1',
+      profileName: 'default',
+      accessKeyId: '',
+      secretAccessKey: '',
+      endpointUrl: '',
+    });
+  }, [defaultRegion]);
+
+  // Invalidate an in-flight connection test when any tested field changes.
+  useEffect(() => {
+    testRequestIdRef.current += 1;
+    setTesting(false);
+    setTestResult(null);
+  }, [formData]);
+
+  // Reset state when dialog opens/closes
+  useEffect(() => {
+    if (open) {
+      if (!editProfile) {
+        setMode('list');
+      }
+      setTestResult(null);
+      setError(null);
+      resetForm();
+      setSelectedProfile(editProfile || null);
+    }
+    if (!open) {
+      discoveryRequestIdRef.current += 1;
+      editLoadRequestIdRef.current += 1;
+      testRequestIdRef.current += 1;
+      setTesting(false);
+      setSelectedProfile(null);
+    }
+  }, [open, editProfile, resetForm]);
+  
+  // Handle edit profile prop
+  useEffect(() => {
+    if (editProfile) {
+      loadProfileToForm(editProfile);
+      setMode('edit');
+      setSelectedProfile(editProfile);
+    }
+  }, [editProfile]);
+  
+  const loadProfileToForm = (profile: Profile) => {
+    const cred = profile.credential_type;
+    const endpointUrl = cred.type === 'CustomEndpoint' ? cred.endpoint_url : '';
+
+    setFormData({
+      name: profile.name,
+      credentialType: cred.type as CredentialTypeKey,
+      region: profile.region || 'us-east-1',
+      profileName: cred.type === 'SharedConfig' ? (cred.profile_name || 'default') : 'default',
+      accessKeyId: 'access_key_id' in cred ? cred.access_key_id : '',
+      secretAccessKey: 'secret_access_key' in cred ? cred.secret_access_key : '',
+      endpointUrl,
+    });
+  };
+
+  const handleCredentialTypeChange = (credentialType: CredentialTypeKey) => {
+    updateField('credentialType', credentialType);
+  };
+
+  const handleFormCancel = () => {
+    setError(null);
+    setTestResult(null);
+    setTesting(false);
+
+    if (editProfile) {
+      onClose();
+      return;
+    }
+
+    resetForm();
+    setSelectedProfile(null);
+    setMode('list');
+  };
+  
+  const buildCredentialType = (): CredentialType => {
+    switch (formData.credentialType) {
+      case 'IdentityCenter':
+        if (selectedProfile?.credential_type.type === 'IdentityCenter') return selectedProfile.credential_type;
+        throw new Error('Complete browser sign-in before saving this profile.');
+      case 'Environment':
+        return { type: 'Environment' };
+      case 'SharedConfig':
+        return { type: 'SharedConfig', profile_name: formData.profileName };
+      case 'Manual':
+        return { 
+          type: 'Manual', 
+          access_key_id: formData.accessKeyId, 
+          secret_access_key: formData.secretAccessKey 
+        };
+      case 'CustomEndpoint':
+        return { 
+          type: 'CustomEndpoint', 
+          endpoint_url: formData.endpointUrl,
+          access_key_id: formData.accessKeyId, 
+          secret_access_key: formData.secretAccessKey 
+        };
+    }
+  };
+  
+  const handleTestConnection = async () => {
+    const requestId = ++testRequestIdRef.current;
+    setTesting(true);
+    setTestResult(null);
+    setError(null);
+    
+    try {
+      const profile: Partial<Profile> = {
+        id: editProfile?.id || '',
+        name: formData.name || 'Test',
+        credential_type: buildCredentialType(),
+        region: formData.region,
+        is_default: false,
+      };
+      
+      const result = await profileApi.testConnection(profile as Profile);
+      if (requestId === testRequestIdRef.current) {
+        setTestResult(result);
+      }
+    } catch (err) {
+      if (requestId === testRequestIdRef.current) {
+        setError(err instanceof Error ? err.message : 'Connection test failed');
+      }
+    } finally {
+      if (requestId === testRequestIdRef.current) {
+        setTesting(false);
+      }
+    }
+  };
+
+  const handleSsoLogin = async () => {
+    const profileName = formData.profileName.trim();
+    if (!profileName) {
+      setError('Choose an AWS SSO profile first.');
+      return;
+    }
+
+    setSigningInSso(true);
+    setError(null);
+    setTestResult(null);
+    try {
+      const message = await profileApi.loginSso(profileName);
+      toast.success('AWS SSO signed in', message);
+      // Folder access is verified when Project Share opens; SSO does not require ListBuckets.
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSigningInSso(false);
+    }
+  };
+  
+  const handleSave = async () => {
+    if (!formData.name.trim()) {
+      setError('Profile name is required');
+      return;
+    }
+    
+    setSaving(true);
+    setError(null);
+    
+    try {
+      const profileData: Partial<Profile> = {
+        name: formData.name,
+        credential_type: buildCredentialType(),
+        region: formData.region,
+        is_default: false,
+      };
+      
+      if (mode === 'edit' && selectedProfile) {
+        const profileToUpdate = { 
+            ...selectedProfile, 
+            ...profileData, 
+            id: selectedProfile.id 
+        };
+        const updated = await profileApi.updateProfile(selectedProfile.id, profileToUpdate);
+        updateProfile(selectedProfile.id, updated);
+        if (selectedProfile.id === activeProfileId) {
+          await bucketApi.refreshS3Client();
+          clearDiscoveredRegions();
+          invalidateBucketCache();
+          invalidateCache();
+        }
+      } else {
+        const created = await profileApi.addProfile(profileData as Profile);
+        addProfile(created);
+        
+        if (profiles.length === 0) {
+          await profileApi.setActiveProfile(created.id);
+          setActiveProfileId(created.id);
+        }
+      }
+      
+      setMode('list');
+      resetForm();
+      if (editProfile) onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSaving(false);
+    }
+  };
+  
+  const handleDelete = async (profileID: string, profileName: string) => {
+    let confirmed = false;
+    try {
+      const { confirm } = await import('@tauri-apps/plugin-dialog');
+      confirmed = await confirm(`This will permanently delete "${profileName}" and clear all cached data.`, {
+        title: 'Delete Profile?',
+        kind: 'warning',
+      });
+    } catch {
+      confirmed = window.confirm(`Delete profile "${profileName}"?`);
+    }
+    
+    if (!confirmed) return;
+    
+    try {
+      await profileApi.deleteProfile(profileID);
+      const [loadedProfiles, activeProfile] = await Promise.all([
+        profileApi.listProfiles(),
+        profileApi.getActiveProfile(),
+      ]);
+      useProfileStore.setState({
+        profiles: loadedProfiles,
+        activeProfileId: activeProfile?.id || null,
+      });
+      
+      resetApp();
+      invalidateBucketCache();
+      clearHistory();
+      clearClipboard();
+      
+      toast.success(`Profile "${profileName}" deleted.`);
+      router.push('/');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete profile');
+    }
+  };
+  
+  const handleEditMode = async (profile: Profile) => {
+    const requestId = ++editLoadRequestIdRef.current;
+    setSelectedProfile(profile);
+    setMode('edit');
+
+    try {
+      const hydratedProfile = await profileApi.getProfile(profile.id);
+      if (requestId !== editLoadRequestIdRef.current) {
+        return;
+      }
+      setSelectedProfile(hydratedProfile);
+      loadProfileToForm(hydratedProfile);
+    } catch {
+      if (requestId === editLoadRequestIdRef.current) {
+        loadProfileToForm(profile);
+      }
+    }
+  };
+
+  const getDialogTitle = () => {
+    if (mode === 'list' && !editProfile) return "Cloud Profiles";
+    if (mode === 'edit') return "Update Profile";
+    return "New Cloud Connection";
+  };
+  
+  const renderList = () => (
+    <Fade in={mode === 'list'}>
+      <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+          {profiles.length === 0 ? (
+            <Box sx={{ 
+              py: 8, 
+              textAlign: 'center', 
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}>
+              <Box sx={{ 
+                width: 100, 
+                height: 100, 
+                borderRadius: 4, 
+                bgcolor: alpha(theme.palette.primary.main, 0.1), 
+                display: 'flex', 
+                alignItems: 'center', 
+                justifyContent: 'center',
+                color: theme.palette.primary.main,
+                mb: 3,
+                boxShadow: `0 12px 32px ${alpha(theme.palette.primary.main, 0.15)}`,
+                border: '1px solid',
+                borderColor: alpha(theme.palette.primary.main, 0.2)
+              }}>
+                <CloudIcon sx={{ fontSize: 48 }} />
+              </Box>
+              <Typography variant="h4" sx={{ fontWeight: 800, mb: 1 }}>Connect to Cloud</Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 4, maxWidth: 350, fontWeight: 500 }}>
+                Manage your AWS, Wasabi, DigitalOcean, or any S3-compatible accounts in one place.
+              </Typography>
+              <Button 
+                variant="contained"
+                size="large"
+                startIcon={<AddIcon />} 
+                onClick={() => setMode('add')}
+                sx={{ 
+                  borderRadius: 100, 
+                  px: 6,
+                  py: 1.8,
+                  fontWeight: 800,
+                  boxShadow: `0 8px 24px ${alpha(theme.palette.primary.main, 0.3)}`
+                }}
+              >
+                Create New Profile
+              </Button>
+            </Box>
+          ) : (
+            <Box>
+              <Typography variant="caption" sx={{ 
+                fontWeight: 800, 
+                letterSpacing: '0.1em', 
+                color: 'text.secondary', 
+                mb: 2, 
+                display: 'block' 
+              }}>
+                ACTIVE CONNECTIONS
+              </Typography>
+              <List sx={{ pt: 0, px: 0 }}>
+                {profiles.map((profile) => (
+                  <Paper 
+                    key={profile.id} 
+                    elevation={0}
+                    sx={{ 
+                      mb: 2, 
+                      borderRadius: 3, 
+                      bgcolor: alpha(theme.palette.background.paper, 0.4),
+                      border: '1px solid',
+                      borderColor: 'divider',
+                      transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+                      '&:hover': {
+                        borderColor: alpha(theme.palette.primary.main, 0.5),
+                        bgcolor: alpha(theme.palette.background.paper, 0.6),
+                        transform: 'translateY(-2px)',
+                        boxShadow: `0 12px 24px ${alpha(theme.palette.common.black, 0.05)}`
+                      }
+                    }}
+                  >
+                    <ListItem disablePadding>
+                      <ListItemButton 
+                        sx={{ py: 2.5, px: 3, borderRadius: 3 }}
+                        onClick={() => handleEditMode(profile)}
+                      >
+                        <ListItemIcon sx={{ minWidth: 60 }}>
+                          <Box sx={{ 
+                            width: 44, 
+                            height: 44, 
+                            borderRadius: 2, 
+                            bgcolor: alpha(theme.palette.primary.main, 0.1),
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                          }}>
+                            <ProfileIcon sx={{ color: theme.palette.primary.main, fontSize: 24 }} />
+                          </Box>
+                        </ListItemIcon>
+                        <ListItemText 
+                          primary={<Typography sx={{ fontWeight: 800, fontSize: '1rem' }}>{profile.name}</Typography>}
+                          secondary={
+                              <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'center', mt: 1 }}>
+                                  <Box sx={{ 
+                                      fontSize: '0.65rem', 
+                                      fontWeight: 800,
+                                      bgcolor: alpha(theme.palette.secondary.main, 0.1), 
+                                      color: theme.palette.secondary.main,
+                                      px: 1.5, 
+                                      py: 0.5,
+                                      borderRadius: 1,
+                                      textTransform: 'uppercase'
+                                  }}>
+                                      {profile.credential_type.type === 'CustomEndpoint' ? 'S3 COMPAT' : profile.credential_type.type}
+                                  </Box>
+                                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, color: 'text.secondary', opacity: 0.8 }}>
+                                      <RegionIcon sx={{ fontSize: 14 }} /> 
+                                      <Typography variant="caption" sx={{ fontWeight: 700 }}>{profile.region || 'global'}</Typography>
+                                  </Box>
+                              </Box>
+                          }
+                          secondaryTypographyProps={{ component: 'div' }}
+                        />
+                        <ListItemSecondaryAction sx={{ right: 24 }}>
+                          <Box sx={{ display: 'flex', gap: 1.5 }}>
+                            <Tooltip title="Settings">
+                                <IconButton 
+                                  size="small" 
+                                  onClick={(e) => { e.stopPropagation(); handleEditMode(profile); }}
+                                  sx={{ bgcolor: alpha(theme.palette.action.hover, 0.5), p: 1 }}
+                                >
+                                    <EditIcon fontSize="small" />
+                                </IconButton>
+                            </Tooltip>
+                            <Tooltip title="Delete">
+                                <IconButton 
+                                  size="small" 
+                                  onClick={(e) => { e.stopPropagation(); handleDelete(profile.id, profile.name); }} 
+                                  color="error"
+                                  sx={{ bgcolor: alpha(theme.palette.error.main, 0.05), p: 1 }}
+                                >
+                                    <DeleteIcon fontSize="small" />
+                                </IconButton>
+                            </Tooltip>
+                          </Box>
+                        </ListItemSecondaryAction>
+                      </ListItemButton>
+                    </ListItem>
+                  </Paper>
+                ))}
+              </List>
+              
+              <Button 
+                fullWidth 
+                variant="outlined" 
+                startIcon={<AddIcon />}
+                onClick={() => { resetForm(); setMode('add'); }}
+                sx={{ 
+                  mt: 1,
+                  borderRadius: 3, 
+                  py: 2,
+                  fontWeight: 800,
+                  borderWidth: '2px !important',
+                  borderColor: alpha(theme.palette.divider, 1)
+                }}
+              >
+                Add Another Profile
+              </Button>
+            </Box>
+          )}
+      </Box>
+    </Fade>
+  );
+  
+  const renderForm = () => (
+    <Fade in={mode !== 'list'}>
+      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3.5 }}>
+        <TextField
+          label="Profile Name"
+          placeholder="e.g. Production AWS"
+          value={formData.name}
+          onChange={(e) => updateField('name', e.target.value)}
+          fullWidth
+          required
+          variant="outlined"
+          sx={{ 
+              mt: 1,
+              '& .MuiOutlinedInput-root': { borderRadius: 2, fontWeight: 600 },
+          }}
+        />
+        
+        <FormControl fullWidth>
+          <InputLabel sx={{ fontWeight: 700 }}>Authentication Method</InputLabel>
+          <Select
+            value={formData.credentialType}
+            label="Authentication Method"
+            onChange={(e) => handleCredentialTypeChange(e.target.value as CredentialTypeKey)}
+            sx={{ borderRadius: 2, fontWeight: 600 }}
+          >
+            <MenuItem value="IdentityCenter">Browser sign-in (no AWS CLI)</MenuItem>
+            <MenuItem value="Environment">System Environment Variables</MenuItem>
+            <MenuItem value="SharedConfig">AWS Profile / IAM Identity Center (SSO)</MenuItem>
+            <MenuItem value="Manual">Manual Credentials (AK/SK)</MenuItem>
+            <MenuItem value="CustomEndpoint">Custom S3 / Compatibility Mode</MenuItem>
+          </Select>
+        </FormControl>
+        
+        {formData.credentialType === 'Environment' && (
+            <Alert 
+              severity={awsEnv?.has_access_key ? "success" : "info"}
+              variant="filled" 
+              sx={{ 
+                  borderRadius: 2, 
+                  fontWeight: 600,
+                  bgcolor: awsEnv?.has_access_key ? alpha(theme.palette.success.main, 0.2) : alpha(theme.palette.info.main, 0.1),
+                  color: 'text.primary',
+                  border: '1px solid',
+                  borderColor: awsEnv?.has_access_key ? theme.palette.success.main : theme.palette.info.main,
+                  '& .MuiAlert-icon': { color: awsEnv?.has_access_key ? theme.palette.success.main : theme.palette.info.main } 
+              }}
+             >
+               {awsEnv?.has_access_key ? (
+                 <Box>
+                   <Typography variant="body2" sx={{ fontWeight: 800 }}>System Credentials Detected</Typography>
+                   <Typography variant="caption" sx={{ fontWeight: 600, opacity: 0.8 }}>
+                     Using: {awsEnv.has_access_key ? 'AWS_ACCESS_KEY_ID' : ''} 
+                     {awsEnv.has_secret_key ? ' + SECRET' : ''}
+                   </Typography>
+                 </Box>
+               ) : (
+                 <Typography variant="body2" sx={{ fontWeight: 600 }}>No <code>AWS_ACCESS_KEY_ID</code> found. Ensure environment variables are set before launch.</Typography>
+               )}
+             </Alert>
+        )}
+        
+        {formData.credentialType === 'IdentityCenter' && <IdentityCenterSetup
+          key={selectedProfile?.id || 'new'} name={formData.name} region={formData.region} profile={selectedProfile}
+          onSaved={async saved => {
+            if (selectedProfile) updateProfile(saved.id, saved); else addProfile(saved);
+            if (profiles.length === 0 || activeProfileId === saved.id) {
+              await profileApi.setActiveProfile(saved.id);
+              setActiveProfileId(saved.id);
+              await bucketApi.refreshS3Client();
+              clearDiscoveredRegions(); invalidateBucketCache(); invalidateCache();
+            }
+            setMode('list'); resetForm(); if (editProfile) onClose();
+          }}
+        />}
+        {formData.credentialType === 'SharedConfig' && (
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+          <Autocomplete
+            freeSolo
+            sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2, fontWeight: 600 } }}
+            value={formData.profileName}
+            onInputChange={(_, newValue) => updateField('profileName', newValue)}
+            onChange={(_, value) => {
+                if (value) {
+                    updateField('profileName', value);
+                    const found = discoveredProfiles.find((p) => p.name === value);
+                    if (found?.region) updateField('region', found.region);
+                }
+            }}
+            options={discoveredProfiles.map((p) => p.name)}
+            renderOption={(props, option) => {
+              const discovered = discoveredProfiles.find((profile) => profile.name === option);
+              return (
+                <Box component="li" {...props} sx={{ display: 'flex', justifyContent: 'space-between', gap: 2 }}>
+                  <span>{option}</span>
+                  {discovered?.is_sso && <Chip label="SSO" size="small" color="primary" />}
+                </Box>
+              );
+            }}
+            renderInput={(params) => (
+                <TextField 
+                    {...params} 
+                    label="Local AWS Profile" 
+                    placeholder="default"
+                    fullWidth
+                />
+              )}
+          />
+          {discoveredProfiles.find((profile) => profile.name === formData.profileName)?.is_sso && (
+            <Alert severity="info" sx={{ borderRadius: 2 }}>
+              <Typography variant="body2" sx={{ fontWeight: 700, mb: 1 }}>
+                AWS IAM Identity Center profile
+              </Typography>
+              <Typography variant="caption" component="div" sx={{ mb: 1.5 }}>
+                This existing local profile uses an AWS CLI session. To sign in without installing AWS CLI, switch to browser sign-in and enter your AWS access portal URL.
+              </Typography>
+              <Button
+                size="small"
+                variant="outlined"
+                onClick={handleSsoLogin}
+                disabled={signingInSso || testing}
+                startIcon={signingInSso ? <CircularProgress size={14} /> : undefined}
+              >
+                {signingInSso ? 'Waiting for browser sign-in…' : 'Sign in with installed AWS CLI'}
+              </Button>
+              <Button size="small" onClick={() => handleCredentialTypeChange('IdentityCenter')}>Use browser sign-in without AWS CLI</Button>
+            </Alert>
+          )}
+          </Box>
+        )}
+        
+        {(formData.credentialType === 'Manual' || formData.credentialType === 'CustomEndpoint') && (
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, p: 3, borderRadius: 3, border: '1px dashed', borderColor: 'divider', bgcolor: alpha(theme.palette.background.paper, 0.3) }}>
+                {formData.credentialType === 'CustomEndpoint' && (
+                  <TextField
+                    label="Endpoint URL"
+                    value={formData.endpointUrl}
+                    onChange={(e) => updateField('endpointUrl', e.target.value)}
+                    fullWidth
+                    placeholder="https://account-id.r2.cloudflarestorage.com"
+                    sx={{ '& .MuiOutlinedInput-root': { borderRadius: 1.5, bgcolor: 'background.paper', fontWeight: 600 } }}
+                  />
+                )}
+                <TextField
+                    label="Access Key ID"
+                    value={formData.accessKeyId}
+                    onChange={(e) => updateField('accessKeyId', e.target.value)}
+                    fullWidth
+                    sx={{ '& .MuiOutlinedInput-root': { borderRadius: 1.5, bgcolor: 'background.paper', fontWeight: 600 } }}
+                />
+                <TextField
+                    label="Secret Access Key"
+                    type="password"
+                    value={formData.secretAccessKey}
+                    onChange={(e) => updateField('secretAccessKey', e.target.value)}
+                    fullWidth
+                    sx={{ '& .MuiOutlinedInput-root': { borderRadius: 1.5, bgcolor: 'background.paper', fontWeight: 600 } }}
+                />
+          </Box>
+        )}
+        
+        <Autocomplete
+          freeSolo
+          options={AWS_REGIONS}
+          value={formData.region}
+          onChange={(_, value) => updateField('region', value || '')}
+          onInputChange={(_, value) => updateField('region', value)}
+          PaperComponent={(props) => (
+            <Paper {...props} sx={{ maxHeight: 300, borderRadius: 2, border: '1px solid', borderColor: 'divider' }} />
+          )}
+          renderInput={(params) => (
+            <TextField
+              {...params}
+              label="Default Region"
+              fullWidth
+              sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2, fontWeight: 600 } }}
+            />
+          )}
+        />
+        
+        {formData.credentialType !== 'IdentityCenter' && <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Button
+              variant="text"
+              onClick={handleTestConnection}
+              disabled={testing}
+              startIcon={testing ? <CircularProgress size={16} /> : <CheckIcon fontSize="small" />}
+              sx={{ borderRadius: 100, fontWeight: 700, px: 2 }}
+            >
+              Test bucket discovery (optional)
+            </Button>
+            
+            {testResult && (
+              <Chip 
+                label={testResult.success ? "Discovery available" : "Discovery unavailable"}
+                color={testResult.success ? "success" : "error"}
+                size="small"
+                sx={{ fontWeight: 800, borderRadius: 1 }}
+              />
+            )}
+          </Box>
+          
+          <Typography variant="caption" color="text.secondary">
+            Bucket discovery needs permission to list all buckets. A folder-only profile can skip this test: save it, then open Project Share to verify access to the configured folder.
+          </Typography>
+          {error && (
+            <Alert severity="error" variant="filled" sx={{ borderRadius: 2, fontWeight: 600 }}>{error}</Alert>
+          )}
+        </Box>}
+      </Box>
+    </Fade>
+  );
+  
+  return (
+    <BaseDialog 
+      open={open} 
+      onClose={onClose} 
+      title={getDialogTitle()}
+      maxWidth="sm"
+      fullWidth
+      actions={
+        mode !== 'list' && formData.credentialType !== 'IdentityCenter' ? (
+          <Box sx={{ display: 'flex', width: '100%', justifyContent: 'space-between', px: 1 }}>
+            <Button 
+              onClick={handleFormCancel} 
+              disabled={saving} 
+              sx={{ fontWeight: 700, color: 'text.secondary' }}
+            >
+              Cancel
+            </Button>
+            <Button 
+              variant="contained" 
+              onClick={handleSave}
+              disabled={saving}
+              sx={{ 
+                  px: 5, 
+                  py: 1,
+                  borderRadius: 100, 
+                  fontWeight: 800,
+                  boxShadow: `0 8px 20px ${alpha(theme.palette.primary.main, 0.2)}`
+              }}
+            >
+              {saving ? 'Saving...' : mode === 'edit' ? 'Update Profile' : 'Connect Account'}
+            </Button>
+          </Box>
+        ) : null
+      }
+    >
+      {open && (mode === 'list' && !editProfile ? renderList() : renderForm())}
+    </BaseDialog>
+  );
+}

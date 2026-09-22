@@ -1,0 +1,245 @@
+'use client';
+
+import { useState, useEffect, useCallback, useRef } from 'react';
+import {
+  Box,
+  Alert,
+  IconButton,
+  Button,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Typography,
+  Slide,
+  Stack,
+} from '@mui/material';
+import { copyToClipboard } from '@/lib/tauri';
+import {
+  Close as CloseIcon,
+  ExpandMore as ExpandMoreIcon,
+  ContentCopy as CopyIcon,
+} from '@mui/icons-material';
+import { useToastStore, Toast } from '@/store/toastStore';
+
+interface ToastItemProps {
+  toast: Toast;
+  onClose: () => void;
+  onShowDetails: () => void;
+}
+
+function ToastItem({ toast, onClose, onShowDetails }: ToastItemProps) {
+  // Store onClose in a ref to prevent timer reset when parent re-renders
+  const onCloseRef = useRef(onClose);
+
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
+  useEffect(() => {
+    if (toast.autoHide) {
+      const timer = setTimeout(() => {
+        onCloseRef.current();
+      }, toast.duration || 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [toast.id, toast.autoHide, toast.duration]); // onClose intentionally removed - use ref
+
+  const hasDetails = !!toast.details || toast.message.length > 100;
+
+  return (
+    <Slide direction="left" in={true} mountOnEnter unmountOnExit>
+      <Alert
+        severity={toast.type}
+        variant="filled"
+        sx={{
+          minWidth: 340,
+          maxWidth: 400,
+          boxShadow: 3,
+          borderRadius: 1,
+          alignItems: 'flex-start',
+          '& .MuiAlert-message': { flex: 1, py: 0.5 },
+          '& .MuiAlert-icon': { py: 1 },
+        }}
+        action={
+          <IconButton
+            size="small"
+            color="inherit"
+            onClick={onClose}
+            sx={{ mt: 0.5 }}
+          >
+            <CloseIcon fontSize="small" />
+          </IconButton>
+        }
+      >
+        <Box>
+          <Typography 
+            variant="body2" 
+            sx={{ 
+              fontWeight: 500, 
+              wordBreak: 'break-word',
+              display: '-webkit-box',
+              WebkitLineClamp: hasDetails ? 2 : 4,
+              WebkitBoxOrient: 'vertical',
+              overflow: 'hidden',
+            }}
+          >
+            {toast.message}
+          </Typography>
+          {toast.action && (
+            <Button
+              size="small"
+              color="inherit"
+              onClick={() => {
+                toast.action?.onClick();
+                // Optionally close toast after action
+                // onClose(); 
+              }}
+              sx={{ 
+                mt: 0.5, 
+                p: 0, 
+                minWidth: 'auto', 
+                fontSize: '0.75rem',
+                fontWeight: 700, 
+                textTransform: 'none',
+                opacity: 1,
+                textDecoration: 'underline',
+                mr: 2,
+                '&:hover': { opacity: 0.8, bgcolor: 'transparent', textDecoration: 'underline' },
+              }}
+            >
+              {toast.action.label}
+            </Button>
+          )}
+
+          {hasDetails && (
+            <Button
+              size="small"
+              color="inherit"
+              endIcon={<ExpandMoreIcon sx={{ fontSize: '16px !important' }} />}
+              onClick={onShowDetails}
+              sx={{ 
+                mt: 0.5, 
+                p: 0, 
+                minWidth: 'auto', 
+                fontSize: '0.75rem',
+                fontWeight: 600, 
+                textTransform: 'none',
+                opacity: 0.9,
+                '&:hover': { opacity: 1, bgcolor: 'transparent' },
+              }}
+            >
+              Show Details
+            </Button>
+          )}
+        </Box>
+      </Alert>
+    </Slide>
+  );
+}
+
+export default function ToastContainer() {
+  const { toasts, removeToast } = useToastStore();
+  const [detailsDialog, setDetailsDialog] = useState<{ open: boolean; toast: Toast | null }>({
+    open: false,
+    toast: null,
+  });
+
+  const handleShowDetails = useCallback((toast: Toast) => {
+    setDetailsDialog({ open: true, toast });
+  }, []);
+
+  const handleCloseDetails = useCallback(() => {
+    setDetailsDialog({ open: false, toast: null });
+  }, []);
+
+  // Memoize the remove function to prevent re-creating callbacks
+  const handleRemoveToast = useCallback((id: string) => {
+    removeToast(id);
+  }, [removeToast]);
+
+  return (
+    <>
+      {/* Toast Stack - Fixed to bottom right */}
+      <Box
+        sx={{
+          position: 'fixed',
+          bottom: 24, // Positioned at bottom right
+          right: 24,
+          zIndex: (theme) => theme.zIndex.snackbar + 1,
+          pointerEvents: 'none',
+          '& > *': { pointerEvents: 'auto' },
+        }}
+      >
+        <Stack spacing={1}>
+          {toasts.map((toast) => (
+            <ToastItem
+              key={toast.id}
+              toast={toast}
+              onClose={() => handleRemoveToast(toast.id)}
+              onShowDetails={() => handleShowDetails(toast)}
+            />
+          ))}
+        </Stack>
+      </Box>
+
+      {/* Details Dialog */}
+      <Dialog
+        open={detailsDialog.open}
+        onClose={handleCloseDetails}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          {detailsDialog.toast?.type === 'error' && '❌ '}
+          {detailsDialog.toast?.type === 'warning' && '⚠️ '}
+          {detailsDialog.toast?.type === 'success' && '✅ '}
+          {detailsDialog.toast?.type === 'info' && 'ℹ️ '}
+          {detailsDialog.toast?.type === 'error' ? 'Error Details' : 
+           detailsDialog.toast?.type === 'warning' ? 'Warning' :
+           detailsDialog.toast?.type === 'success' ? 'Success' : 'Information'}
+        </DialogTitle>
+        <DialogContent dividers>
+          <Typography variant="body1" sx={{ mb: 2, fontWeight: 500 }}>
+            {detailsDialog.toast?.message}
+          </Typography>
+          {detailsDialog.toast?.details && (
+            <Box
+              sx={{
+                p: 2,
+                bgcolor: 'action.hover',
+                borderRadius: 1,
+                fontFamily: 'monospace',
+                fontSize: '0.85rem',
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word',
+                maxHeight: 300,
+                overflow: 'auto',
+              }}
+            >
+              {detailsDialog.toast.details}
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseDetails}>Close</Button>
+          {detailsDialog.toast?.details && (
+            <Button
+              variant="contained"
+              startIcon={<CopyIcon />}
+              onClick={async () => {
+                if (detailsDialog.toast) {
+                  await copyToClipboard(
+                    `${detailsDialog.toast.message}\n\n${detailsDialog.toast.details || ''}`
+                  );
+                }
+              }}
+            >
+              Copy to Clipboard
+            </Button>
+          )}
+        </DialogActions>
+      </Dialog>
+    </>
+  );
+}
