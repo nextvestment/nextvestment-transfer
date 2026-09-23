@@ -12,7 +12,17 @@ aws cloudformation deploy --profile YOUR_PROFILE --region YOUR_BUCKET_REGION \
 
 The template retains the bucket on stack deletion, encrypts objects, enables versions, blocks public access and denies non-TLS requests. It creates no IAM identities and no credentials. It does not delete uploaded files automatically. Interrupted multipart uploads expire after seven days.
 
-Use individual AWS SSO access where available. For external/VDI use, an AWS administrator should bind `access-policy.example.json` (with the bucket name substituted) to the approved project-only identity or role. Do not distribute a PowerUser session or commit access keys. Temporary credentials require access key, secret key and session token; configure them via an AWS shared profile or environment variables (including AWS_SESSION_TOKEN), not the manual key form. Renew them when they expire. Share only non-secret bucket/region/prefix settings through your approved project channel. Assign each person their own IAM Identity Center access and have each computer sign in independently. Do not share access keys, cached sessions or sign-in tokens.
+Use individual AWS SSO access where available. For a project-approved VDI shared setup without browser sign-in, an IAM administrator can create one dedicated IAM user with programmatic access, bind `access-policy.example.json` (with bucket name and folder prefix substituted), and issue its long-term access key once. The template must be reviewed against the actual bucket policy and any KMS encryption policy. Share the completed setup JSON only through the approved private team channel; do not commit it, reuse a PowerUser key, or distribute a temporary SSO session. IAM keys remain usable until revoked or rotated and should be rotated when team access changes. The existing SSO PowerUser role does not authorize IAM user/key creation.
+
+For the existing Nextvestment transfer bucket in account `102076848754`, an IAM administrator can generate the dedicated identity and a one-paste setup file in one command:
+
+```sh
+python3 project-transfer/aws/provision_shared_setup.py \
+  --profile YOUR_IAM_ADMIN_PROFILE \
+  --output "$HOME/Downloads/nextvestment-transfer-shared-setup.json"
+```
+
+The script verifies the account, refuses an existing IAM user or output file, creates a user allowed only in `s3://nextvestment-ascendasia-transfer-102076848754/ascendasia/`, writes the secret to a private file, and never prints it. Review its policy before running. Copy the file contents into **Paste shared setup** on each approved computer. Keep the file out of Git. If creation fails, inspect the IAM user before retrying; the script attempts to roll back its changes. The current `nextvestment` PowerUser profile can verify the bucket but cannot run this IAM provisioning command.
 
 The sample policy allows listing only `project-share/` and reading/uploading inside that prefix. It intentionally grants no account-wide bucket listing, deletion, IAM administration or application-data access. In the client, use Project Share directly rather than Discover buckets. Deleting, moving or renaming remote files is not supported by this policy; make a corrected upload under a new filename. Version history remains available to the bucket administrator.
 

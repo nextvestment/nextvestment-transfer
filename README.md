@@ -4,11 +4,13 @@ MIT-licensed desktop S3 shared-folder client based on [Brows3](https://github.co
 
 ## Use the app
 
-Open a compatible desktop package. Windows portable execution needs an existing WebView2 runtime. Choose **Browser sign-in (no AWS CLI)**, enter your company's AWS access portal URL and IAM Identity Center region, approve the displayed code through AWS, then select an assigned account and role. No AWS CLI or copied AWS configuration is required for native sign-in.
+Open a compatible desktop package. Windows portable execution needs an existing WebView2 runtime. For a project-approved long-term IAM key, choose **Paste shared setup** in Cloud Profiles and paste one JSON string containing the folder and key pair. The app saves the secret in the operating-system vault and the non-secret folder settings separately. No AWS browser sign-in is needed on that computer. See [shared-folder setup](project-transfer/SETUP.md) for the format and administrator policy.
+
+Alternatively choose **Browser sign-in (no AWS CLI)**, enter your company's AWS access portal URL and IAM Identity Center region, approve the displayed code through AWS, then select an assigned account and role. No AWS CLI or copied AWS configuration is required for native sign-in.
 
 Configure Project Share with your private bucket, region and folder prefix. Upload through the app on one computer, then refresh and download on another. This is an S3 shared-folder interface, not automatic local-filesystem synchronization.
 
-Native sign-in tokens and manual secret keys use the operating-system vault. Each computer signs in independently. Browser sign-in must be repeated when the SSO session expires. Existing environment/shared-profile/manual credential modes remain available. The manual form accepts key pairs only. The app does not grant AWS permissions or make buckets public.
+Native sign-in tokens and manual secret keys use the operating-system vault. Browser sign-in must be repeated when the SSO session expires. An imported IAM key remains usable until it is revoked or rotated; Transfer does not create or extend AWS credentials. Existing environment/shared-profile/manual credential modes remain available. The app does not grant AWS permissions or make buckets public.
 
 [Generic setup](project-transfer/SETUP.md) | [Scoped AWS policy and bucket template](project-transfer/aws/README.md)
 

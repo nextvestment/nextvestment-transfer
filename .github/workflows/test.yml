@@ -29,6 +29,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec playwright install --with-deps chromium webkit
       - run: pnpm test
+      - run: python3 -m unittest discover -s project-transfer/aws -p 'test_*.py' -v
       - run: pnpm typecheck
       - run: pnpm lint --max-warnings 0
       - run: pnpm test:smoke

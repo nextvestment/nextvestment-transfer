@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.48] - 2026-09-23
+
+### Added
+- Import one administrator-issued JSON setup string to configure a long-term IAM key and project folder on a new computer. Store the secret in the operating-system vault and reject temporary session keys.
+- Provide a one-command IAM administrator script for the existing Nextvestment transfer bucket that creates a dedicated folder-scoped key and private setup file.
+
 ## [0.2.47] - 2026-09-22
 
 ### Fixed

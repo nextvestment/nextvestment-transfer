@@ -46,6 +46,8 @@ import { useRouter } from 'next/navigation';
 import IdentityCenterSetup from './IdentityCenterSetup';
 import { BaseDialog } from '../common/BaseDialog';
 import { invalidateBucketCache } from '@/hooks/useBuckets';
+import { parseSharedSetup, SharedSetupError } from '@/lib/sharedSetup';
+import { useProjectShareStore } from '@/store/projectShareStore';
 
 const AWS_REGIONS = [
   'auto',
@@ -96,7 +98,8 @@ export default function ProfileDialog({ open, onClose, editProfile }: ProfileDia
   const { clear: clearClipboard } = useClipboardStore();
   const { defaultRegion } = useSettingsStore();
   
-  const [mode, setMode] = useState<'list' | 'add' | 'edit'>('list');
+  const [mode, setMode] = useState<'list' | 'add' | 'edit' | 'import'>('list');
+  const [setupString, setSetupString] = useState('');
   const [formData, setFormData] = useState<ProfileFormData>({
     name: '',
     credentialType: 'IdentityCenter' as CredentialTypeKey,
@@ -201,6 +204,7 @@ export default function ProfileDialog({ open, onClose, editProfile }: ProfileDia
       setSelectedProfile(editProfile || null);
     }
     if (!open) {
+      setSetupString('');
       discoveryRequestIdRef.current += 1;
       editLoadRequestIdRef.current += 1;
       testRequestIdRef.current += 1;
@@ -238,6 +242,7 @@ export default function ProfileDialog({ open, onClose, editProfile }: ProfileDia
   };
 
   const handleFormCancel = () => {
+    setSetupString('');
     setError(null);
     setTestResult(null);
     setTesting(false);
@@ -378,6 +383,47 @@ export default function ProfileDialog({ open, onClose, editProfile }: ProfileDia
       setSaving(false);
     }
   };
+
+  const handleImportSetup = async () => {
+    setSaving(true);
+    setError(null);
+    let profileSaved = false;
+    try {
+      const setup = parseSharedSetup(setupString);
+      setSetupString('');
+      if (profiles.some(profile => profile.name === setup.name)) {
+        throw new Error('A profile with this name already exists.');
+      }
+      const created = await profileApi.addProfile({
+        name: setup.name,
+        credential_type: { type: 'Manual', access_key_id: setup.accessKeyId, secret_access_key: setup.secretAccessKey },
+        region: setup.share.region,
+        is_default: false,
+      });
+      profileSaved = true;
+      addProfile(created.credential_type.type === 'Manual' ? {
+        ...created,
+        credential_type: { ...created.credential_type, secret_access_key: '' },
+      } : created);
+      useProjectShareStore.getState().saveShare(created.id, setup.share);
+      await profileApi.setActiveProfile(created.id);
+      setActiveProfileId(created.id);
+      await bucketApi.refreshS3Client();
+      clearDiscoveredRegions();
+      invalidateBucketCache();
+      invalidateCache();
+      setMode('list');
+      toast.success('Shared folder configured', 'Open Project Share to check folder access.');
+    } catch (cause) {
+      setError(cause instanceof SharedSetupError ? cause.message
+        : profileSaved ? 'The profile was saved, but could not be activated. Select it from Cloud Profiles.'
+          : cause instanceof Error && cause.message === 'A profile with this name already exists.' ? cause.message
+            : 'Could not save the setup. Check the key and try again.');
+    } finally {
+      setSetupString('');
+      setSaving(false);
+    }
+  };
   
   const handleDelete = async (profileID: string, profileName: string) => {
     let confirmed = false;
@@ -437,6 +483,7 @@ export default function ProfileDialog({ open, onClose, editProfile }: ProfileDia
 
   const getDialogTitle = () => {
     if (mode === 'list' && !editProfile) return "Cloud Profiles";
+    if (mode === 'import') return 'Paste Shared Setup';
     if (mode === 'edit') return "Update Profile";
     return "New Cloud Connection";
   };
@@ -488,6 +535,7 @@ export default function ProfileDialog({ open, onClose, editProfile }: ProfileDia
               >
                 Create New Profile
               </Button>
+              <Button onClick={() => { setError(null); setMode('import'); }} sx={{ mt: 2 }}>Paste shared setup</Button>
             </Box>
           ) : (
             <Box>
@@ -607,6 +655,7 @@ export default function ProfileDialog({ open, onClose, editProfile }: ProfileDia
               >
                 Add Another Profile
               </Button>
+              <Button onClick={() => { setError(null); setMode('import'); }} sx={{ mt: 1 }}>Paste shared setup</Button>
             </Box>
           )}
       </Box>
@@ -824,6 +873,27 @@ export default function ProfileDialog({ open, onClose, editProfile }: ProfileDia
       </Box>
     </Fade>
   );
+
+  const renderImport = () => (
+    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+      <Typography variant="body2" color="text.secondary">
+        Paste the shared setup JSON supplied by your administrator. This saves the access key in the operating-system vault and configures the same project folder on this computer. No browser sign-in is needed.
+      </Typography>
+      <TextField
+        label="Shared setup JSON"
+        type="password"
+        value={setupString}
+        onChange={event => setSetupString(event.target.value)}
+        autoComplete="off"
+        fullWidth
+        inputProps={{ 'aria-label': 'Shared setup JSON' }}
+      />
+      <Typography variant="caption" color="text.secondary">
+        Use a long-term IAM key scoped to this folder. Temporary AWS session keys expire and cannot be imported here.
+      </Typography>
+      {error && <Alert severity="error">{error}</Alert>}
+    </Box>
+  );
   
   return (
     <BaseDialog 
@@ -833,7 +903,14 @@ export default function ProfileDialog({ open, onClose, editProfile }: ProfileDia
       maxWidth="sm"
       fullWidth
       actions={
-        mode !== 'list' && formData.credentialType !== 'IdentityCenter' ? (
+        mode === 'import' ? (
+          <Box sx={{ display: 'flex', width: '100%', justifyContent: 'space-between' }}>
+            <Button onClick={handleFormCancel} disabled={saving}>Cancel</Button>
+            <Button variant="contained" onClick={handleImportSetup} disabled={saving || !setupString.trim()}>
+              {saving ? 'Saving…' : 'Save shared setup'}
+            </Button>
+          </Box>
+        ) : mode !== 'list' && formData.credentialType !== 'IdentityCenter' ? (
           <Box sx={{ display: 'flex', width: '100%', justifyContent: 'space-between', px: 1 }}>
             <Button 
               onClick={handleFormCancel} 
@@ -860,7 +937,7 @@ export default function ProfileDialog({ open, onClose, editProfile }: ProfileDia
         ) : null
       }
     >
-      {open && (mode === 'list' && !editProfile ? renderList() : renderForm())}
+      {open && (mode === 'list' && !editProfile ? renderList() : mode === 'import' ? renderImport() : renderForm())}
     </BaseDialog>
   );
 }
