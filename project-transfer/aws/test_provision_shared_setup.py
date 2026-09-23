@@ -33,6 +33,8 @@ class ProvisionSharedSetupTest(unittest.TestCase):
                 return {"Account": ACCOUNT}
             if args[:2] == ("iam", "get-user"):
                 raise RuntimeError("NoSuchEntity")
+            if args[:2] == ("cloudformation", "describe-stacks"):
+                raise RuntimeError("Stack with id transfer-share does not exist")
             if args[:2] == ("s3api", "get-bucket-location"):
                 return {"LocationConstraint": REGION}
             if args[:2] == ("iam", "create-access-key"):

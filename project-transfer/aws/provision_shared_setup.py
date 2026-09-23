@@ -81,6 +81,18 @@ def main() -> int:
     else:
         parser.error(f"IAM user {args.iam_user} already exists. Inspect it before issuing another key.")
 
+    stack_name = f"transfer-share-{args.account}"
+    if args.create_bucket:
+        try:
+            stack = aws("cloudformation", "describe-stacks", "--stack-name", stack_name)["Stacks"][0]
+        except RuntimeError as error:
+            if "does not exist" not in str(error):
+                raise
+        else:
+            parameters = {item["ParameterKey"]: item.get("ParameterValue") for item in stack.get("Parameters", [])}
+            if parameters.get("BucketName") != args.bucket or parameters.get("FolderPrefix") != prefix:
+                raise RuntimeError("Existing transfer bucket stack has different bucket or folder parameters.")
+
     fd = os.open(output, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     created = False
     policy_attached = False
@@ -88,7 +100,7 @@ def main() -> int:
     try:
         if args.create_bucket:
             run_aws(args.profile, args.region, "cloudformation", "deploy", "--stack-name",
-                    f"transfer-share-{args.account}", "--template-file", str(BUCKET_TEMPLATE),
+                    stack_name, "--template-file", str(BUCKET_TEMPLATE),
                     "--parameter-overrides", f"BucketName={args.bucket}", f"FolderPrefix={prefix}",
                     "--no-fail-on-empty-changeset",
                     json_output=False)
