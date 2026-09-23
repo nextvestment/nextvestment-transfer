@@ -4,6 +4,10 @@ Parameters:
   BucketName:
     Type: String
     AllowedPattern: '[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]'
+  FolderPrefix:
+    Type: String
+    Default: project-share/
+    AllowedPattern: '[A-Za-z0-9][A-Za-z0-9._/-]*/'
 Resources:
   ProjectBucket:
     Type: AWS::S3::Bucket
@@ -59,4 +63,4 @@ Outputs:
   Region:
     Value: !Ref AWS::Region
   ProjectPrefix:
-    Value: project-share/
+    Value: !Ref FolderPrefix
