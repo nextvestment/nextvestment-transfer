@@ -33,6 +33,13 @@ jobs:
           Set-Content portable/README.txt 'Requires an existing Microsoft WebView2 runtime. Open Cloud Profiles and choose Paste shared setup for an administrator-issued folder key, or choose AWS browser sign-in. AWS CLI and Git are not required. Secrets use Windows Credential Manager. Portable metadata does not include credentials. Follow your organization software policy.'
           Compress-Archive -Path portable/* -DestinationPath NextvestmentTransfer-Windows-portable.zip
       - uses: actions/upload-artifact@v4
+        if: runner.os == 'Windows'
+        with:
+          name: nextvestment-transfer-Windows-portable
+          path: NextvestmentTransfer-Windows-portable.zip
+          if-no-files-found: error
+          retention-days: 30
+      - uses: actions/upload-artifact@v4
         with:
           name: nextvestment-transfer-${{ runner.os }}
           path: |
