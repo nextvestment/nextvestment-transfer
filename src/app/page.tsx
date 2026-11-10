@@ -38,6 +38,7 @@ import { useBuckets } from '@/hooks/useBuckets';
 import { useHistoryStore } from '@/store/historyStore';
 import { useAppStore } from '@/store/appStore';
 import { toast } from '@/store/toastStore';
+import ReceiveFileCard from '@/components/share/ReceiveFileCard';
 import ProjectShareCard from '@/components/share/ProjectShareCard';
 import BucketManagementDialog, { type BucketAction } from '@/components/dialogs/BucketManagementDialog';
 
@@ -176,6 +177,7 @@ function HomeContent() {
         textAlign: 'center', 
         p: 3 
       }}>
+        <Box sx={{ width: '100%', maxWidth: 600, textAlign: 'left', mb: 4 }}><ReceiveFileCard /></Box>
         <CloudIcon sx={{ fontSize: 100, color: 'text.secondary', mb: 3, opacity: 0.5 }} />
         <Typography variant="h5" color="text.primary" gutterBottom fontWeight={600}>
           No Profile Selected
@@ -316,6 +318,7 @@ function HomeContent() {
       py: 4
     }}>
       <Container maxWidth="sm">
+        <ReceiveFileCard />
         <ProjectShareCard key={activeProfile.id} profileId={activeProfile.id} profileName={activeProfile.name} defaultRegion={activeProfile.region || ''} />
 
         <Paper 

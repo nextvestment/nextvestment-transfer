@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Receive a file from a signed AWS S3 download link without any AWS account or sign-in: paste the link, choose a destination and optionally verify a SHA-256 checksum. Only HTTPS links on AWS S3 endpoints with a complete SigV4 query are accepted, redirects are refused, downloads are capped at 10 GB, and the link is never stored or logged.
+
 ## [0.2.48] - 2026-09-23
 
 ### Added

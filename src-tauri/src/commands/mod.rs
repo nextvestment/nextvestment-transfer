@@ -1,5 +1,6 @@
 pub mod bucket_management;
 pub mod buckets;
+pub mod handoff;
 pub mod objects;
 pub mod operations;
 pub mod profiles;

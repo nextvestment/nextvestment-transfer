@@ -5,7 +5,7 @@ pub mod s3;
 pub mod transfer;
 
 use commands::{
-    bucket_management, buckets, objects, operations, profiles, transfer as transfer_cmd,
+    bucket_management, buckets, handoff, objects, operations, profiles, transfer as transfer_cmd,
 };
 use s3::S3ClientManager;
 use serde::Serialize;
@@ -306,6 +306,7 @@ pub fn run() {
             objects::list_objects,
             objects::search_objects,
             objects::get_presigned_url,
+            handoff::receive_handoff,
             objects::get_object_content,
             objects::put_object_content,
             // File operations

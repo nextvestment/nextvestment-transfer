@@ -495,3 +495,9 @@ export const transferApi = {
     return invoke<void>('set_transfer_concurrency', { maxConcurrency });
   },
 };
+
+// Bearer links remain ephemeral and bypass request history and profile selection.
+export async function receiveHandoff(link: string, localPath: string, expectedSha256?: string): Promise<{ bytes: number; sha256: string }> {
+  const nativeInvoke = await getTauriInvoke();
+  return nativeInvoke('receive_handoff', { link, localPath, expectedSha256: expectedSha256 ?? null });
+}
